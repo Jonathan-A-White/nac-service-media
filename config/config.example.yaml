@@ -1,0 +1,63 @@
+# Example configuration for nac-service-media
+# Copy this file to config.yaml and fill in your values
+# Or run the CLI without a config to be prompted for setup
+
+paths:
+  # Directory where OBS saves recordings
+  source_directory: "/path/to/obs/recordings"
+  # Directory for trimmed video output
+  trimmed_directory: "/path/to/Trimmed"
+  # Directory for extracted audio output
+  audio_directory: "/path/to/Audio"
+
+audio:
+  # Audio bitrate for mp3 extraction (e.g., "128k", "192k", "256k")
+  bitrate: "192k"
+
+google:
+  # Path to Google service account credentials JSON file
+  credentials_file: "credentials.json"
+  # Google Drive folder ID for the Services folder
+  # Find this in the URL when viewing the folder in Drive
+  services_folder_id: "your-folder-id-here"
+
+email:
+  # Display name for outgoing emails
+  from_name: "Your Church Name"
+  # Gmail address to send from
+  from_address: "yourchurch@gmail.com"
+
+  # SMTP settings for Gmail
+  smtp:
+    host: "smtp.gmail.com"
+    port: 587
+    # Use Gmail App Password, not your regular password
+    # Generate at: https://myaccount.google.com/apppasswords
+    # Or set via GMAIL_APP_PASSWORD environment variable
+    app_password: ""
+
+  # Recipients to CC on every email
+  default_cc:
+    - name: "Your Name"
+      address: "you@example.com"
+
+  # Quick-lookup recipients (use nickname when sending)
+  # Example: service-media send --to mom
+  recipients:
+    mom:
+      name: "Mom Smith"
+      address: "mom@example.com"
+    dad:
+      name: "Dad Smith"
+      address: "dad@example.com"
+
+# Future: Automatic timestamp detection settings
+# detection:
+#   cross_region:
+#     x: 100
+#     y: 50
+#     width: 200
+#     height: 150
+#   start_scan_minutes: 20
+#   end_scan_minutes: 30
+#   min_confidence: 0.6
