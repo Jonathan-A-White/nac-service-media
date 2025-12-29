@@ -24,8 +24,8 @@ nac-service-media process \
   --source "/path/to/2025-12-28 10-06-16.mp4" \
   --start "00:05:30" \
   --end "01:45:00" \
-  --priest "Pr. de Vries" \
-  --to monica
+  --priest "Pr. Smith" \
+  --to jane
 ```
 
 ## Installation
@@ -62,13 +62,13 @@ Gmail address to send from: whiteplainsnac@gmail.com
 Display name: White Plains NAC
 Gmail App Password: ********
 
-Default CC recipient name: Jonathan White
-Default CC recipient email: jonathan.jawhite@gmail.com
+Default CC recipient name: Your Name
+Default CC recipient email: you@example.com
 
 Add a quick-lookup recipient? (y/n): y
-  Nickname: monica
-  Full name: Monica Strobel
-  Email: monica.strobel@verizon.net
+  Nickname: jane
+  Full name: Jane Doe
+  Email: jane.doe@example.com
 Add another? (y/n): n
 
 Configuration saved to config.yaml
