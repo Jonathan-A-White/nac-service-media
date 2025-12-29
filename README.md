@@ -24,7 +24,7 @@ nac-service-media process \
   --source "/path/to/2025-12-28 10-06-16.mp4" \
   --start "00:05:30" \
   --end "01:45:00" \
-  --priest "Pr. Smith" \
+  --minister "Pr. Smith" \
   --to jane
 ```
 
