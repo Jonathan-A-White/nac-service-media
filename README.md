@@ -58,10 +58,6 @@ Where should audio files go? /mnt/c/Users/jonat/Videos/Audio
 Google Drive folder ID for Services: 1dPV078FlLsWUFGjjoq3-epJiY_tBGXC8
 Path to Google credentials file: credentials.json
 
-Gmail address to send from: whiteplainsnac@gmail.com
-Display name: White Plains NAC
-Gmail App Password: ********
-
 Default CC recipient name: Your Name
 Default CC recipient email: you@example.com
 
@@ -92,13 +88,7 @@ cp config/config.example.yaml config.yaml
 
 ## Gmail Setup
 
-For sending emails, use a Gmail App Password:
-
-1. Go to [Google Account Security](https://myaccount.google.com/security)
-2. Enable 2-Step Verification if not already enabled
-3. Go to [App Passwords](https://myaccount.google.com/apppasswords)
-4. Generate a new app password for "Mail"
-5. Use this in your config (not your regular Gmail password)
+Gmail sending uses OAuth 2.0 with the same service account credentials used for Google Drive. The service account must have domain-wide delegation enabled, or you can use OAuth with a one-time browser authorization that stores a refresh token.
 
 ## Roadmap
 

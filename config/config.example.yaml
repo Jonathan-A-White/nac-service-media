@@ -24,17 +24,8 @@ google:
 email:
   # Display name for outgoing emails
   from_name: "Your Church Name"
-  # Gmail address to send from
+  # Gmail address to send from (must match OAuth authorized account)
   from_address: "yourchurch@gmail.com"
-
-  # SMTP settings for Gmail
-  smtp:
-    host: "smtp.gmail.com"
-    port: 587
-    # Use Gmail App Password, not your regular password
-    # Generate at: https://myaccount.google.com/apppasswords
-    # Or set via GMAIL_APP_PASSWORD environment variable
-    app_password: ""
 
   # Recipients to CC on every email
   default_cc:
