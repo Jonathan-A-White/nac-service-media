@@ -12,9 +12,6 @@ var (
 	// ErrNoServiceDate is returned when the service date is missing
 	ErrNoServiceDate = errors.New("service date is required")
 
-	// ErrNoMinister is returned when the minister name is missing
-	ErrNoMinister = errors.New("minister name is required")
-
 	// ErrNoMediaURLs is returned when neither audio nor video URL is provided
 	ErrNoMediaURLs = errors.New("at least one media URL (audio or video) is required")
 

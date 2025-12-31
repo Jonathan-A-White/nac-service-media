@@ -53,6 +53,51 @@ func TestEmailTemplate_RenderPlainText(t *testing.T) {
 	}
 }
 
+func TestEmailTemplate_RenderPlainText_WithMinister(t *testing.T) {
+	data := TemplateData{
+		Greeting:     "Dear John,",
+		ServiceRef:   "today's",
+		MinisterName: "Pr. Smith",
+		AudioURL:     "https://drive.google.com/file/d/abc/view",
+		VideoURL:     "https://drive.google.com/file/d/xyz/view",
+		SenderName:   "Jonathan",
+	}
+
+	body, err := DefaultTemplate.RenderPlainText(data)
+	if err != nil {
+		t.Fatalf("RenderPlainText() error = %v", err)
+	}
+
+	expected := "service with Pr. Smith."
+	if !strings.Contains(body, expected) {
+		t.Errorf("RenderPlainText() should contain %q when minister provided, got:\n%s", expected, body)
+	}
+}
+
+func TestEmailTemplate_RenderPlainText_WithoutMinister(t *testing.T) {
+	data := TemplateData{
+		Greeting:     "Dear John,",
+		ServiceRef:   "today's",
+		MinisterName: "", // No minister
+		AudioURL:     "https://drive.google.com/file/d/abc/view",
+		VideoURL:     "https://drive.google.com/file/d/xyz/view",
+		SenderName:   "Jonathan",
+	}
+
+	body, err := DefaultTemplate.RenderPlainText(data)
+	if err != nil {
+		t.Fatalf("RenderPlainText() error = %v", err)
+	}
+
+	// Should end with "service." not "service with ."
+	if !strings.Contains(body, "today's service.") {
+		t.Errorf("RenderPlainText() should contain \"today's service.\" when no minister, got:\n%s", body)
+	}
+	if strings.Contains(body, "service with") {
+		t.Errorf("RenderPlainText() should not contain \"service with\" when no minister, got:\n%s", body)
+	}
+}
+
 func TestEmailTemplate_RenderHTML(t *testing.T) {
 	data := TemplateData{
 		Greeting:     "Dear John,",
@@ -73,6 +118,51 @@ func TestEmailTemplate_RenderHTML(t *testing.T) {
 	}
 	if !strings.Contains(body, `<a href="https://drive.google.com/file/d/xyz/view">video</a>`) {
 		t.Errorf("RenderHTML() missing video link in:\n%s", body)
+	}
+}
+
+func TestEmailTemplate_RenderHTML_WithMinister(t *testing.T) {
+	data := TemplateData{
+		Greeting:     "Dear John,",
+		ServiceRef:   "today's",
+		MinisterName: "Pr. Smith",
+		AudioURL:     "https://drive.google.com/file/d/abc/view",
+		VideoURL:     "https://drive.google.com/file/d/xyz/view",
+		SenderName:   "Jonathan",
+	}
+
+	body, err := DefaultTemplate.RenderHTML(data)
+	if err != nil {
+		t.Fatalf("RenderHTML() error = %v", err)
+	}
+
+	expected := "service with Pr. Smith."
+	if !strings.Contains(body, expected) {
+		t.Errorf("RenderHTML() should contain %q when minister provided, got:\n%s", expected, body)
+	}
+}
+
+func TestEmailTemplate_RenderHTML_WithoutMinister(t *testing.T) {
+	data := TemplateData{
+		Greeting:     "Dear John,",
+		ServiceRef:   "today's",
+		MinisterName: "", // No minister
+		AudioURL:     "https://drive.google.com/file/d/abc/view",
+		VideoURL:     "https://drive.google.com/file/d/xyz/view",
+		SenderName:   "Jonathan",
+	}
+
+	body, err := DefaultTemplate.RenderHTML(data)
+	if err != nil {
+		t.Fatalf("RenderHTML() error = %v", err)
+	}
+
+	// Should end with "service." not "service with ."
+	if !strings.Contains(body, "today's service.") {
+		t.Errorf("RenderHTML() should contain \"today's service.\" when no minister, got:\n%s", body)
+	}
+	if strings.Contains(body, "service with") {
+		t.Errorf("RenderHTML() should not contain \"service with\" when no minister, got:\n%s", body)
 	}
 }
 

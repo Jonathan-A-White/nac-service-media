@@ -35,9 +35,6 @@ func (r *EmailRequest) Validate() error {
 	if r.ServiceDate.IsZero() {
 		return ErrNoServiceDate
 	}
-	if r.MinisterName == "" {
-		return ErrNoMinister
-	}
 	if r.AudioURL == "" && r.VideoURL == "" {
 		return ErrNoMediaURLs
 	}

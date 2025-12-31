@@ -45,9 +45,9 @@ func TestEmailRequest_Validate(t *testing.T) {
 			wantErr: ErrNoServiceDate,
 		},
 		{
-			name:    "no minister",
+			name:    "no minister is valid",
 			modify:  func(r *EmailRequest) { r.MinisterName = "" },
-			wantErr: ErrNoMinister,
+			wantErr: nil,
 		},
 		{
 			name:    "no media URLs",

@@ -31,7 +31,7 @@ var DefaultTemplate = EmailTemplate{
 	SubjectFormat: "{{.ChurchName}}: Recording of Service on {{.DateFormatted}}",
 	PlainText: `{{.Greeting}}
 
-Here is the audio and video from {{.ServiceRef}} service with {{.MinisterName}}.
+Here is the audio and video from {{.ServiceRef}} service{{if .MinisterName}} with {{.MinisterName}}{{end}}.
 
 Audio: {{.AudioURL}}
 Video: {{.VideoURL}}
@@ -39,7 +39,7 @@ Video: {{.VideoURL}}
 Thanks!
 {{.SenderName}}`,
 	HTML: `<div dir="ltr">{{.Greeting}}<br><br>
-Here is the <a href="{{.AudioURL}}">audio</a> and <a href="{{.VideoURL}}">video</a> from {{.ServiceRef}} service with {{.MinisterName}}.<br><br>
+Here is the <a href="{{.AudioURL}}">audio</a> and <a href="{{.VideoURL}}">video</a> from {{.ServiceRef}} service{{if .MinisterName}} with {{.MinisterName}}{{end}}.<br><br>
 Thanks!<br>
 {{.SenderName}}</div>`,
 }
