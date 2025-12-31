@@ -38,4 +38,5 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeDriveScenario(ctx)
 	steps.InitializeCleanupScenario(ctx)
 	steps.InitializeUploadScenario(ctx)
+	steps.InitializeEmailScenario(ctx)
 }
