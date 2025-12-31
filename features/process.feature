@@ -193,3 +193,57 @@ Feature: End-to-End Process Command
       | --recipient| jane                               |
     Then the process should succeed
     And the output should include "Removed: 2025-11-01.mp4"
+
+  # Skip video mode scenarios
+  Scenario: Skip video mode extracts audio only
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    When I run process with flags:
+      | flag         | value                              |
+      | --input      | /test/source/2025-12-28 10-06-16.mp4 |
+      | --start      | 00:05:30                           |
+      | --end        | 01:45:00                           |
+      | --minister   | smith                              |
+      | --recipient  | jane                               |
+      | --skip-video |                                    |
+    Then the process should succeed
+    And the video should not be trimmed
+    And the audio should be extracted with timestamps "00:05:30" to "01:45:00"
+    And the video should not be uploaded to Drive
+    And the audio should be uploaded to Drive
+    And email should be sent to "jane@example.com"
+    And email should include audio link only
+
+  Scenario: Skip video mode progress shows 4 steps
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    When I run process with flags:
+      | flag         | value                              |
+      | --input      | /test/source/2025-12-28 10-06-16.mp4 |
+      | --start      | 00:05:30                           |
+      | --end        | 01:45:00                           |
+      | --minister   | smith                              |
+      | --recipient  | jane                               |
+      | --skip-video |                                    |
+    Then the process should succeed
+    And the output should include "Mode: Audio-only (--skip-video)"
+    And the output should include "[1/4] Extracting audio"
+    And the output should include "[2/4] Checking Drive storage"
+    And the output should include "[3/4] Uploading audio"
+    And the output should include "[4/4] Sending email"
+    And the output should include "Done!"
+
+  Scenario: Skip video mode still runs mp4 cleanup when needed
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    And drive has very insufficient space for audio
+    And drive has old files:
+      | name           | size      |
+      | 2025-11-01.mp4 | 1073741824|
+    When I run process with flags:
+      | flag         | value                              |
+      | --input      | /test/source/2025-12-28 10-06-16.mp4 |
+      | --start      | 00:05:30                           |
+      | --end        | 01:45:00                           |
+      | --minister   | smith                              |
+      | --recipient  | jane                               |
+      | --skip-video |                                    |
+    Then the process should succeed
+    And the output should include "Removed: 2025-11-01.mp4"

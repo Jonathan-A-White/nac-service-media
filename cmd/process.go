@@ -32,6 +32,7 @@ var (
 	processCCKeys        []string
 	processDateOverride  string
 	processSenderKey     string
+	processSkipVideo     bool
 )
 
 var processCmd = &cobra.Command{
@@ -75,7 +76,10 @@ Example:
     --end 01:45:00 \
     --minister smith \
     --recipient jane --recipient john \
-    --sender avteam`,
+    --sender avteam
+
+  # Audio-only mode (skip video trimming and upload)
+  nac-service-media process --skip-video --start 00:05:30 --end 01:45:00 --minister smith --recipient jane`,
 	RunE: runProcess,
 }
 
@@ -84,14 +88,15 @@ func init() {
 	processCmd.Flags().StringVar(&processInputPath, "input", "", "Path to source video file (defaults to newest in source directory)")
 	processCmd.Flags().StringVar(&processStartTime, "start", "", "Start timestamp in HH:MM:SS format (auto-detected if omitted)")
 	processCmd.Flags().StringVar(&processEndTime, "end", "", "End timestamp in HH:MM:SS format (auto-detected if omitted)")
-	processCmd.Flags().StringVar(&processMinisterKey, "minister", "", "Minister config key (required)")
+	processCmd.Flags().StringVar(&processMinisterKey, "minister", "", "Minister config key (optional, omit to exclude from email)")
 	processCmd.Flags().StringArrayVar(&processRecipientKeys, "recipient", nil, "Recipient config key(s) (required, can be repeated)")
 	processCmd.Flags().StringArrayVar(&processCCKeys, "cc", nil, "Additional CC config key(s) (optional)")
 	processCmd.Flags().StringVar(&processDateOverride, "date", "", "Override service date (YYYY-MM-DD)")
 	processCmd.Flags().StringVar(&processSenderKey, "sender", "", "Sender config key (defaults to config default_sender)")
+	processCmd.Flags().BoolVar(&processSkipVideo, "skip-video", false, "Skip video trimming and upload; extract audio directly from source using timestamps")
 
 	// --start and --end are now optional (auto-detected when omitted)
-	processCmd.MarkFlagRequired("minister")
+	// --minister is optional (email will omit minister section if not provided)
 	processCmd.MarkFlagRequired("recipient")
 }
 
@@ -188,6 +193,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		CCKeys:        processCCKeys,
 		DateOverride:  processDateOverride,
 		SenderKey:     processSenderKey,
+		SkipVideo:     processSkipVideo,
 	}
 
 	return runProcessWithClients(
@@ -247,6 +253,7 @@ type ProcessInput struct {
 	CCKeys        []string
 	DateOverride  string
 	SenderKey     string
+	SkipVideo     bool
 }
 
 // FileFinder interface for finding files (allows testing)
@@ -341,6 +348,7 @@ func runProcessWithClients(
 		CCKeys:        input.CCKeys,
 		DateOverride:  input.DateOverride,
 		SenderKey:     input.SenderKey,
+		SkipVideo:     input.SkipVideo,
 	}
 
 	_, err := service.Process(ctx, processInput)
@@ -409,6 +417,7 @@ func RunProcessWithDependencies(
 		CCKeys:        input.CCKeys,
 		DateOverride:  input.DateOverride,
 		SenderKey:     input.SenderKey,
+		SkipVideo:     input.SkipVideo,
 	}
 
 	_, err = service.Process(ctx, processInput)

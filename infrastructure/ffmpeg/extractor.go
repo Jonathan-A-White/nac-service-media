@@ -46,14 +46,24 @@ func NewExtractor(opts ...ExtractorOption) *Extractor {
 
 // Extract implements video.AudioExtractor
 func (e *Extractor) Extract(ctx context.Context, req *video.AudioExtractionRequest, outputPath string) error {
-	args := []string{
+	var args []string
+
+	// If timestamps are provided, add seek and duration options
+	if req.HasTimestamps() {
+		args = append(args,
+			"-ss", req.StartTime.String(),
+			"-to", req.EndTime.String(),
+		)
+	}
+
+	args = append(args,
 		"-i", req.SourceVideoPath,
 		"-vn",                   // No video
 		"-acodec", "libmp3lame", // MP3 codec
 		"-ab", req.Bitrate,      // Audio bitrate
 		"-y",                    // Overwrite output file if it exists
 		outputPath,
-	}
+	)
 
 	if err := e.runner.Run(ctx, e.ffmpegPath, args...); err != nil {
 		return fmt.Errorf("ffmpeg audio extraction failed: %w", err)

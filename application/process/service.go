@@ -76,6 +76,7 @@ type Input struct {
 	CCKeys        []string // CC config keys (optional)
 	DateOverride  string   // Override service date (YYYY-MM-DD)
 	SenderKey     string   // Sender config key (optional, uses default if empty)
+	SkipVideo     bool     // Skip video trimming and upload; extract audio from source
 }
 
 // Result contains the results of a successful process run
@@ -112,8 +113,23 @@ func (s *Service) Process(ctx context.Context, input Input) (*Result, error) {
 
 	fmt.Fprintf(s.output, "Using source: %s\n", filepath.Base(sourcePath))
 	fmt.Fprintf(s.output, "Service date: %s\n", serviceDate.Format("2006-01-02"))
-	fmt.Fprintf(s.output, "Minister: %s\n\n", ministerName)
+	if ministerName != "" {
+		fmt.Fprintf(s.output, "Minister: %s\n", ministerName)
+	}
+	if input.SkipVideo {
+		fmt.Fprintf(s.output, "Mode: Audio-only (--skip-video)\n")
+	}
+	fmt.Fprintln(s.output)
 
+	// Route to appropriate workflow
+	if input.SkipVideo {
+		return s.processAudioOnly(ctx, input, sourcePath, serviceDate, recipients, ccRecipients, ministerName, senderName, startTime)
+	}
+	return s.processFullWorkflow(ctx, input, sourcePath, serviceDate, recipients, ccRecipients, ministerName, senderName, startTime)
+}
+
+// processFullWorkflow handles the standard video+audio workflow
+func (s *Service) processFullWorkflow(ctx context.Context, input Input, sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName, senderName string, processStartTime time.Time) (*Result, error) {
 	// Step 1: Trim video
 	fmt.Fprintf(s.output, "[1/7] Trimming video...\n")
 	trimResult, err := s.trimVideo(ctx, sourcePath, input.StartTime, input.EndTime)
@@ -185,13 +201,74 @@ func (s *Service) Process(ctx context.Context, input Input) (*Result, error) {
 	}
 	fmt.Fprintln(s.output)
 
-	elapsed := time.Since(startTime)
+	elapsed := time.Since(processStartTime)
 	fmt.Fprintf(s.output, "Done! Completed in %s\n", formatDuration(elapsed))
 
 	return &Result{
 		TrimmedPath: trimResult.OutputPath,
 		AudioPath:   audioResult.OutputPath,
 		VideoURL:    videoUploadResult.ShareableURL,
+		AudioURL:    audioUploadResult.ShareableURL,
+		ServiceDate: serviceDate,
+	}, nil
+}
+
+// processAudioOnly handles the audio-only workflow (--skip-video mode)
+func (s *Service) processAudioOnly(ctx context.Context, input Input, sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName, senderName string, processStartTime time.Time) (*Result, error) {
+	// Step 1: Extract audio directly from source with timestamps
+	fmt.Fprintf(s.output, "[1/4] Extracting audio...\n")
+	audioResult, err := s.extractAudioWithTimestamps(ctx, sourcePath, serviceDate, input.StartTime, input.EndTime)
+	if err != nil {
+		s.showRecoveryCommandsAudioOnly(1, input, sourcePath, serviceDate)
+		return nil, fmt.Errorf("audio extraction failed: %w", err)
+	}
+	fmt.Fprintf(s.output, "      Created: %s\n\n", audioResult.OutputPath)
+
+	// Step 2: Ensure Drive storage (still run cleanup for mp4s)
+	fmt.Fprintf(s.output, "[2/4] Checking Drive storage...\n")
+	audioSize := s.fileSizer.Size(audioResult.OutputPath)
+	cleanupResult, err := s.ensureStorage(ctx, audioSize)
+	if err != nil {
+		s.showRecoveryCommandsAudioOnly(2, input, sourcePath, serviceDate)
+		return nil, fmt.Errorf("storage check failed: %w", err)
+	}
+	for _, df := range cleanupResult.DeletedFiles {
+		fmt.Fprintf(s.output, "      Removed: %s (%.1f MB)\n", df.Name, float64(df.Size)/1024/1024)
+	}
+	if len(cleanupResult.DeletedFiles) == 0 {
+		fmt.Fprintf(s.output, "      Storage OK\n")
+	}
+	fmt.Fprintln(s.output)
+
+	// Step 3: Upload audio
+	fmt.Fprintf(s.output, "[3/4] Uploading audio...\n")
+	audioUploadResult, err := s.uploadAudio(ctx, audioResult.OutputPath)
+	if err != nil {
+		s.showRecoveryCommandsAudioOnly(3, input, sourcePath, serviceDate)
+		return nil, fmt.Errorf("audio upload failed: %w", err)
+	}
+	fmt.Fprintf(s.output, "      Uploaded: %s\n", filepath.Base(audioResult.OutputPath))
+	fmt.Fprintf(s.output, "      Audio link: %s\n\n", audioUploadResult.ShareableURL)
+
+	// Step 4: Send email (audio only)
+	fmt.Fprintf(s.output, "[4/4] Sending email...\n")
+	err = s.sendEmail(recipients, ccRecipients, serviceDate, ministerName, senderName, audioUploadResult.ShareableURL, "")
+	if err != nil {
+		s.showRecoveryCommandsAudioOnly(4, input, sourcePath, serviceDate)
+		return nil, fmt.Errorf("email failed: %w", err)
+	}
+	for _, r := range recipients {
+		fmt.Fprintf(s.output, "      Sent to: %s <%s>\n", r.Name, r.Address)
+	}
+	fmt.Fprintln(s.output)
+
+	elapsed := time.Since(processStartTime)
+	fmt.Fprintf(s.output, "Done! Completed in %s\n", formatDuration(elapsed))
+
+	return &Result{
+		TrimmedPath: "", // No trimmed video
+		AudioPath:   audioResult.OutputPath,
+		VideoURL:    "", // No video URL
 		AudioURL:    audioUploadResult.ShareableURL,
 		ServiceDate: serviceDate,
 	}, nil
@@ -235,16 +312,18 @@ func (s *Service) validateInputs(input Input) (sourcePath string, serviceDate ti
 		}
 	}
 
-	// Lookup minister
-	minister, ministerErr := config.NewConfigManager(s.cfg, "").GetMinister(input.MinisterKey)
-	if ministerErr != nil {
-		err = &ValidationError{
-			Message:    fmt.Sprintf("minister '%s' not found in config", input.MinisterKey),
-			Suggestion: config.SuggestAddMinisterCommand(input.MinisterKey),
+	// Lookup minister (optional - if key provided)
+	if input.MinisterKey != "" {
+		minister, ministerErr := config.NewConfigManager(s.cfg, "").GetMinister(input.MinisterKey)
+		if ministerErr != nil {
+			err = &ValidationError{
+				Message:    fmt.Sprintf("minister '%s' not found in config", input.MinisterKey),
+				Suggestion: config.SuggestAddMinisterCommand(input.MinisterKey),
+			}
+			return
 		}
-		return
+		ministerName = minister.Name
 	}
-	ministerName = minister.Name
 
 	// Lookup recipients
 	lookup := config.NewRecipientLookup(s.cfg, "")
@@ -326,6 +405,21 @@ func (s *Service) extractAudio(ctx context.Context, videoPath string, serviceDat
 	})
 }
 
+func (s *Service) extractAudioWithTimestamps(ctx context.Context, sourcePath string, serviceDate time.Time, startTime, endTime string) (*appvideo.ExtractResult, error) {
+	bitrate := s.cfg.Audio.Bitrate
+	if bitrate == "" {
+		bitrate = video.DefaultAudioBitrate
+	}
+	extractService := appvideo.NewExtractService(s.extractor, s.fileChecker, s.cfg.Paths.AudioDirectory, bitrate)
+	return extractService.ExtractWithTimestamps(ctx, appvideo.ExtractWithTimestampsInput{
+		SourcePath:  sourcePath,
+		ServiceDate: serviceDate,
+		Bitrate:     bitrate,
+		StartTime:   startTime,
+		EndTime:     endTime,
+	})
+}
+
 func (s *Service) ensureStorage(ctx context.Context, neededBytes int64) (*distribution.CleanupResult, error) {
 	cleanupService := appdist.NewCleanupService(s.driveClient, s.cfg.Google.ServicesFolderID)
 	return cleanupService.EnsureSpaceAvailable(ctx, neededBytes)
@@ -386,6 +480,38 @@ func (s *Service) showRecoveryCommands(failedStep int, input Input, sourcePath s
 			recipientArgs += fmt.Sprintf(" --to %s", r)
 		}
 		fmt.Fprintf(s.output, "  %d. Email:      nac-service-media send-email%s --date %s --minister %q --audio-url <URL> --video-url <URL>\n", step, recipientArgs, dateStr, input.MinisterKey)
+	}
+	fmt.Fprintln(s.output)
+}
+
+func (s *Service) showRecoveryCommandsAudioOnly(failedStep int, input Input, sourcePath string, serviceDate time.Time) {
+	fmt.Fprintln(s.output)
+	fmt.Fprintln(s.output, "To complete manually:")
+
+	dateStr := serviceDate.Format("2006-01-02")
+	audioPath := filepath.Join(s.cfg.Paths.AudioDirectory, dateStr+".mp3")
+
+	step := 1
+	if failedStep <= 1 {
+		fmt.Fprintf(s.output, "  %d. Extract:    nac-service-media extract-audio --source %q --start %s --end %s\n", step, sourcePath, input.StartTime, input.EndTime)
+		step++
+	}
+	if failedStep <= 2 {
+		fmt.Fprintf(s.output, "  %d. Auth:       nac-service-media auth drive\n", step)
+		step++
+		fmt.Fprintf(s.output, "  %d. Cleanup:    nac-service-media cleanup --ensure-space 200MB\n", step)
+		step++
+	}
+	if failedStep <= 3 {
+		fmt.Fprintf(s.output, "  %d. Upload:     nac-service-media upload --audio %q\n", step, audioPath)
+		step++
+	}
+	if failedStep <= 4 {
+		recipientArgs := ""
+		for _, r := range input.RecipientKeys {
+			recipientArgs += fmt.Sprintf(" --to %s", r)
+		}
+		fmt.Fprintf(s.output, "  %d. Email:      nac-service-media send-email%s --date %s --minister %q --audio-url <URL>\n", step, recipientArgs, dateStr, input.MinisterKey)
 	}
 	fmt.Fprintln(s.output)
 }

@@ -363,6 +363,7 @@ func InitializeProcessScenario(ctx *godog.ScenarioContext) {
 
 	// Drive state steps
 	ctx.Step(`^drive has insufficient space$`, driveHasInsufficientSpace)
+	ctx.Step(`^drive has very insufficient space for audio$`, driveHasVeryInsufficientSpaceForAudio)
 	ctx.Step(`^drive has old files:$`, driveHasOldFiles)
 	ctx.Step(`^the drive upload will fail with "([^"]*)"$`, theDriveUploadWillFailWith)
 
@@ -389,6 +390,12 @@ func InitializeProcessScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the output should include "([^"]*)"$`, theOutputShouldInclude)
 	ctx.Step(`^the output should include recovery commands$`, theOutputShouldIncludeRecoveryCommands)
 	ctx.Step(`^the recovery should suggest "([^"]*)" command$`, theRecoveryShouldSuggestCommand)
+
+	// Skip video mode steps
+	ctx.Step(`^the video should not be trimmed$`, theVideoShouldNotBeTrimmed)
+	ctx.Step(`^the audio should be extracted with timestamps "([^"]*)" to "([^"]*)"$`, theAudioShouldBeExtractedWithTimestamps)
+	ctx.Step(`^the video should not be uploaded to Drive$`, theVideoShouldNotBeUploadedToDrive)
+	ctx.Step(`^email should include audio link only$`, emailShouldIncludeAudioLinkOnly)
 }
 
 func theProcessConfigHasPaths(table *godog.Table) error {
@@ -511,6 +518,13 @@ func driveHasInsufficientSpace() error {
 	return nil
 }
 
+func driveHasVeryInsufficientSpaceForAudio() error {
+	p := getProcessContext()
+	// Set storage to have only 10MB free (not enough for audio which is ~85MB)
+	p.driveService.storageUsage = p.driveService.storageLimit - 10*1024*1024 // Only 10MB free
+	return nil
+}
+
 func driveHasOldFiles(table *godog.Table) error {
 	p := getProcessContext()
 	for i, row := range table.Rows {
@@ -555,6 +569,7 @@ func iRunProcessWithFlags(table *godog.Table) error {
 	}
 
 	// Build process input from flags
+	_, skipVideo := p.flags["--skip-video"]
 	input := cmd.ProcessInput{
 		InputPath:    getFirstFlag(p.flags, "--input"),
 		StartTime:    getFirstFlag(p.flags, "--start"),
@@ -563,6 +578,7 @@ func iRunProcessWithFlags(table *godog.Table) error {
 		RecipientKeys: p.flags["--recipient"],
 		CCKeys:       p.flags["--cc"],
 		DateOverride: getFirstFlag(p.flags, "--date"),
+		SkipVideo:    skipVideo,
 	}
 
 	// Run the process command with dependencies
@@ -831,4 +847,67 @@ func theRecoveryShouldSuggestCommand(command string) error {
 		return fmt.Errorf("expected %q command suggestion in output:\n%s", command, output)
 	}
 	return nil
+}
+
+// --- Skip video mode step implementations ---
+
+func theVideoShouldNotBeTrimmed() error {
+	p := getProcessContext()
+	if p.trimCalled {
+		return fmt.Errorf("expected video not to be trimmed, but trim was called")
+	}
+	return nil
+}
+
+func theAudioShouldBeExtractedWithTimestamps(start, end string) error {
+	p := getProcessContext()
+	if !p.extractCalled {
+		return fmt.Errorf("audio extraction was not called")
+	}
+	call := p.extractor.calls[0]
+	if call.req.StartTime == nil || call.req.EndTime == nil {
+		return fmt.Errorf("expected audio to be extracted with timestamps, but no timestamps provided")
+	}
+	if call.req.StartTime.String() != start {
+		return fmt.Errorf("expected start time %q, got %q", start, call.req.StartTime.String())
+	}
+	if call.req.EndTime.String() != end {
+		return fmt.Errorf("expected end time %q, got %q", end, call.req.EndTime.String())
+	}
+	return nil
+}
+
+func theVideoShouldNotBeUploadedToDrive() error {
+	p := getProcessContext()
+	// Check that no mp4 files were uploaded
+	for _, f := range p.driveService.uploadedFiles {
+		if strings.HasSuffix(f.Name, ".mp4") {
+			return fmt.Errorf("expected no video upload, but found: %s", f.Name)
+		}
+	}
+	return nil
+}
+
+func emailShouldIncludeAudioLinkOnly() error {
+	p := getProcessContext()
+	if !p.emailSent {
+		return fmt.Errorf("no email was sent")
+	}
+	for _, msg := range p.gmailService.sentMessages {
+		decoded, err := base64.URLEncoding.DecodeString(msg.Raw)
+		if err != nil {
+			continue
+		}
+		content := string(decoded)
+		// Check that audio link is present
+		if !strings.Contains(content, "audio") {
+			return fmt.Errorf("email does not contain audio link")
+		}
+		// Check that video is not mentioned as a link
+		if strings.Contains(content, "video</a>") || strings.Contains(content, "Video:") {
+			return fmt.Errorf("email should not contain video link, but found video link in content")
+		}
+		return nil
+	}
+	return fmt.Errorf("no matching email found")
 }

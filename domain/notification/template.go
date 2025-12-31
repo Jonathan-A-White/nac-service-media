@@ -31,15 +31,17 @@ var DefaultTemplate = EmailTemplate{
 	SubjectFormat: "{{.ChurchName}}: Recording of Service on {{.DateFormatted}}",
 	PlainText: `{{.Greeting}}
 
-Here is the audio and video from {{.ServiceRef}} service{{if .MinisterName}} with {{.MinisterName}}{{end}}.
+{{if .VideoURL}}Here is the audio and video from {{.ServiceRef}} service{{if .MinisterName}} with {{.MinisterName}}{{end}}.
 
 Audio: {{.AudioURL}}
-Video: {{.VideoURL}}
+Video: {{.VideoURL}}{{else}}Here is the audio from {{.ServiceRef}} service{{if .MinisterName}} with {{.MinisterName}}{{end}}.
+
+Audio: {{.AudioURL}}{{end}}
 
 Thanks!
 {{.SenderName}}`,
 	HTML: `<div dir="ltr">{{.Greeting}}<br><br>
-Here is the <a href="{{.AudioURL}}">audio</a> and <a href="{{.VideoURL}}">video</a> from {{.ServiceRef}} service{{if .MinisterName}} with {{.MinisterName}}{{end}}.<br><br>
+{{if .VideoURL}}Here is the <a href="{{.AudioURL}}">audio</a> and <a href="{{.VideoURL}}">video</a> from {{.ServiceRef}} service{{if .MinisterName}} with {{.MinisterName}}{{end}}.{{else}}Here is the <a href="{{.AudioURL}}">audio</a> from {{.ServiceRef}} service{{if .MinisterName}} with {{.MinisterName}}{{end}}.{{end}}<br><br>
 Thanks!<br>
 {{.SenderName}}</div>`,
 }
