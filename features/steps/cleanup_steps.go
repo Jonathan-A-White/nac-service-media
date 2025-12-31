@@ -102,6 +102,26 @@ func (m *cleanupMockDriveService) EmptyTrash(ctx context.Context) error {
 	return nil
 }
 
+func (m *cleanupMockDriveService) UploadFile(ctx context.Context, fileName, mimeType, folderID, localPath string) (*googledrive.File, error) {
+	if m.shouldFail {
+		return nil, m.failError
+	}
+	return &googledrive.File{
+		Id:          "uploaded-file-id",
+		Name:        fileName,
+		MimeType:    mimeType,
+		Size:        1024,
+		WebViewLink: "https://drive.google.com/file/d/uploaded-file-id/view",
+	}, nil
+}
+
+func (m *cleanupMockDriveService) CreatePermission(ctx context.Context, fileID string, permission *googledrive.Permission) error {
+	if m.shouldFail {
+		return m.failError
+	}
+	return nil
+}
+
 // cleanupContext holds test state for cleanup scenarios
 type cleanupContext struct {
 	folderID      string

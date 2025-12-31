@@ -22,6 +22,15 @@ type DriveClient interface {
 
 	// EmptyTrash empties the trash permanently
 	EmptyTrash(ctx context.Context) error
+
+	// Upload uploads a file to Google Drive
+	Upload(ctx context.Context, req UploadRequest) (*UploadResult, error)
+
+	// SetPublicSharing sets "anyone with link" permission on a file
+	SetPublicSharing(ctx context.Context, fileID string) error
+
+	// UploadAndShare uploads a file and sets public sharing in one operation
+	UploadAndShare(ctx context.Context, req UploadRequest) (*UploadResult, error)
 }
 
 // FileInfo represents metadata about a file in Google Drive

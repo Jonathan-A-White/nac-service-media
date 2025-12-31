@@ -21,6 +21,8 @@ type DriveService interface {
 	GetAbout(ctx context.Context, fields string) (*drive.About, error)
 	DeleteFile(ctx context.Context, fileID string) error
 	EmptyTrash(ctx context.Context) error
+	UploadFile(ctx context.Context, fileName, mimeType, folderID, localPath string) (*drive.File, error)
+	CreatePermission(ctx context.Context, fileID string, permission *drive.Permission) error
 }
 
 // GoogleDriveService is the production implementation using the Google Drive API
@@ -55,6 +57,38 @@ func (s *GoogleDriveService) DeleteFile(ctx context.Context, fileID string) erro
 // EmptyTrash empties the trash
 func (s *GoogleDriveService) EmptyTrash(ctx context.Context) error {
 	return s.service.Files.EmptyTrash().Context(ctx).Do()
+}
+
+// UploadFile uploads a file to Google Drive
+func (s *GoogleDriveService) UploadFile(ctx context.Context, fileName, mimeType, folderID, localPath string) (*drive.File, error) {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("unable to open file: %w", err)
+	}
+	defer f.Close()
+
+	fileMetadata := &drive.File{
+		Name:     fileName,
+		Parents:  []string{folderID},
+		MimeType: mimeType,
+	}
+
+	file, err := s.service.Files.Create(fileMetadata).
+		Media(f).
+		Fields("id, name, size, webViewLink").
+		Context(ctx).
+		Do()
+	if err != nil {
+		return nil, fmt.Errorf("unable to upload file: %w", err)
+	}
+
+	return file, nil
+}
+
+// CreatePermission creates a permission on a file
+func (s *GoogleDriveService) CreatePermission(ctx context.Context, fileID string, permission *drive.Permission) error {
+	_, err := s.service.Permissions.Create(fileID, permission).Context(ctx).Do()
+	return err
 }
 
 // Client implements distribution.DriveClient using Google Drive API
@@ -203,6 +237,50 @@ func (c *Client) EmptyTrash(ctx context.Context) error {
 		return fmt.Errorf("unable to empty trash: %w", err)
 	}
 	return nil
+}
+
+// Upload implements distribution.DriveClient
+func (c *Client) Upload(ctx context.Context, req distribution.UploadRequest) (*distribution.UploadResult, error) {
+	file, err := c.driveService.UploadFile(ctx, req.FileName, req.MimeType, req.FolderID, req.LocalPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload file: %w", err)
+	}
+
+	return &distribution.UploadResult{
+		FileID:       file.Id,
+		FileName:     file.Name,
+		ShareableURL: file.WebViewLink,
+		Size:         file.Size,
+	}, nil
+}
+
+// SetPublicSharing implements distribution.DriveClient
+func (c *Client) SetPublicSharing(ctx context.Context, fileID string) error {
+	permission := &drive.Permission{
+		Type: "anyone",
+		Role: "reader",
+	}
+
+	if err := c.driveService.CreatePermission(ctx, fileID, permission); err != nil {
+		return fmt.Errorf("unable to set sharing permission: %w", err)
+	}
+	return nil
+}
+
+// UploadAndShare implements distribution.DriveClient
+func (c *Client) UploadAndShare(ctx context.Context, req distribution.UploadRequest) (*distribution.UploadResult, error) {
+	result, err := c.Upload(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := c.SetPublicSharing(ctx, result.FileID); err != nil {
+		return nil, fmt.Errorf("uploaded but failed to set sharing: %w", err)
+	}
+
+	// Generate proper sharing URL
+	result.ShareableURL = fmt.Sprintf("https://drive.google.com/file/d/%s/view?usp=sharing", result.FileID)
+	return result, nil
 }
 
 // Ensure Client implements distribution.DriveClient

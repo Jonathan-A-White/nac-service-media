@@ -55,6 +55,26 @@ func (m *mockDriveService) EmptyTrash(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockDriveService) UploadFile(ctx context.Context, fileName, mimeType, folderID, localPath string) (*drive.File, error) {
+	if m.shouldFail {
+		return nil, m.failError
+	}
+	return &drive.File{
+		Id:          "uploaded-file-id",
+		Name:        fileName,
+		MimeType:    mimeType,
+		Size:        1024,
+		WebViewLink: "https://drive.google.com/file/d/uploaded-file-id/view",
+	}, nil
+}
+
+func (m *mockDriveService) CreatePermission(ctx context.Context, fileID string, permission *drive.Permission) error {
+	if m.shouldFail {
+		return m.failError
+	}
+	return nil
+}
+
 func TestClient_ListFiles(t *testing.T) {
 	testTime := time.Date(2025, 12, 28, 10, 0, 0, 0, time.UTC)
 
