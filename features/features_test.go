@@ -39,4 +39,5 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeCleanupScenario(ctx)
 	steps.InitializeUploadScenario(ctx)
 	steps.InitializeEmailScenario(ctx)
+	steps.InitializeConfigCrudScenario(ctx)
 }

@@ -9,10 +9,16 @@ import (
 
 // Config represents the complete application configuration
 type Config struct {
-	Paths  PathsConfig  `yaml:"paths"`
-	Audio  AudioConfig  `yaml:"audio"`
-	Google GoogleConfig `yaml:"google"`
-	Email  EmailConfig  `yaml:"email"`
+	Paths     PathsConfig              `yaml:"paths"`
+	Audio     AudioConfig              `yaml:"audio"`
+	Google    GoogleConfig             `yaml:"google"`
+	Email     EmailConfig              `yaml:"email"`
+	Ministers map[string]MinisterConfig `yaml:"ministers,omitempty"`
+}
+
+// MinisterConfig represents a minister's information
+type MinisterConfig struct {
+	Name string `yaml:"name"`
 }
 
 // PathsConfig contains directory paths for media processing
