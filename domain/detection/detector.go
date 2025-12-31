@@ -61,3 +61,25 @@ type FrameAnalysis struct {
 	// TimestampSeconds is the frame's position in the video
 	TimestampSeconds int
 }
+
+// EndDetector defines the interface for detecting service end timestamps
+type EndDetector interface {
+	// DetectEnd analyzes a video's audio to find the three-fold amen
+	// serviceStartSeconds is the detected/provided service start time in the video
+	DetectEnd(ctx context.Context, videoPath string, serviceStartSeconds int) (EndDetectionResult, error)
+}
+
+// EndDetectionResult contains the outcome of end timestamp detection
+type EndDetectionResult struct {
+	// Timestamp is the detected end time (end of amen)
+	Timestamp video.Timestamp
+
+	// Confidence is the match score (0.0-1.0)
+	Confidence float64
+
+	// Detected indicates whether the amen was found
+	Detected bool
+
+	// Error message if detection failed
+	Error string
+}

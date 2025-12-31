@@ -76,3 +76,29 @@ func (s *Service) DetectStart(ctx context.Context, input DetectInput) (*DetectRe
 func (s *Service) IsEnabled() bool {
 	return s.config.Enabled
 }
+
+// DetectEnd finds the service end by detecting the three-fold amen
+// serviceStartSeconds is the detected/provided service start time (used to calculate search window)
+func (s *Service) DetectEnd(ctx context.Context, videoPath string, serviceStartSeconds int) (*DetectResult, error) {
+	fmt.Fprintln(s.output, "Analyzing audio for service end...")
+	fmt.Fprintln(s.output, "  Searching for three-fold amen...")
+
+	detector := infradetection.NewAmenDetector(s.config)
+
+	result, err := detector.DetectEnd(ctx, videoPath, serviceStartSeconds)
+	if err != nil {
+		return nil, err
+	}
+
+	if !result.Detected {
+		return nil, fmt.Errorf("could not detect amen: %s", result.Error)
+	}
+
+	fmt.Fprintf(s.output, "Detected end: %s (amen detected, confidence: %.0f%%)\n",
+		result.Timestamp, result.Confidence*100)
+
+	return &DetectResult{
+		Timestamp:  result.Timestamp.String(),
+		Confidence: result.Confidence,
+	}, nil
+}

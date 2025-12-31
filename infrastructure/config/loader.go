@@ -20,22 +20,26 @@ type Config struct {
 
 // DetectionConfig contains settings for automatic timestamp detection
 type DetectionConfig struct {
-	Enabled      bool                      `yaml:"enabled"`
-	TemplatesDir string                    `yaml:"templates_dir"`
-	Thresholds   DetectionThresholdsConfig `yaml:"thresholds"`
-	SearchRange  SearchRangeConfig         `yaml:"search_range"`
+	Enabled           bool                      `yaml:"enabled"`
+	TemplatesDir      string                    `yaml:"templates_dir"`
+	AudioTemplatesDir string                    `yaml:"audio_templates_dir"`
+	Thresholds        DetectionThresholdsConfig `yaml:"thresholds"`
+	SearchRange       SearchRangeConfig         `yaml:"search_range"`
 }
 
 // DetectionThresholdsConfig contains detection threshold settings
 type DetectionThresholdsConfig struct {
-	MatchScore       float64 `yaml:"match_score"`
+	MatchScore        float64 `yaml:"match_score"`
 	CoarseStepSeconds int     `yaml:"coarse_step_seconds"`
+	AmenMatchScore    float64 `yaml:"amen_match_score"`
 }
 
 // SearchRangeConfig contains the video time range to search for cross lighting
 type SearchRangeConfig struct {
-	StartMinutes int `yaml:"start_minutes"`
-	EndMinutes   int `yaml:"end_minutes"`
+	StartMinutes              int `yaml:"start_minutes"`
+	EndMinutes                int `yaml:"end_minutes"`
+	AmenStartOffsetMinutes    int `yaml:"amen_start_offset_minutes"`
+	AmenSearchDurationMinutes int `yaml:"amen_search_duration_minutes"`
 }
 
 // SendersConfig contains sender configuration with default sender

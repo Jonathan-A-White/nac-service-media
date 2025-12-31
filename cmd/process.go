@@ -39,19 +39,20 @@ var processCmd = &cobra.Command{
 	Short: "Process a service recording through the complete workflow",
 	Long: `Process a service recording through the complete automated workflow:
 1. Detect or specify start timestamp (auto-detection when --start omitted)
-2. Trim video to specified timestamps
-3. Extract audio as MP3
-4. Clean up old files from Google Drive if needed
-5. Upload video and audio to Google Drive
-6. Share files publicly
-7. Send email notification with links
+2. Detect or specify end timestamp (auto-detection when --end omitted)
+3. Trim video to specified timestamps
+4. Extract audio as MP3
+5. Clean up old files from Google Drive if needed
+6. Upload video and audio to Google Drive
+7. Share files publicly
+8. Send email notification with links
 
 The source video can be specified with --input, or the newest file in the
 source directory will be used by default.
 
-The start timestamp can be auto-detected (cross lighting up) when --start is
-omitted and detection.enabled is true in config. You will be prompted to
-confirm or adjust the detected timestamp.
+Timestamps can be auto-detected when detection.enabled is true in config:
+  --start: Detects when the cross lights up (visual template matching)
+  --end: Detects the three-fold amen song (audio template matching)
 
 The service date is inferred from the filename (OBS format: YYYY-MM-DD HH-MM-SS.mp4),
 or can be specified with --date.
@@ -59,10 +60,13 @@ or can be specified with --date.
 Ministers, recipients, and CCs are looked up by their config keys.
 
 Example:
-  # Auto-detect start timestamp
+  # Fully automatic - detect both start and end
+  nac-service-media process --minister smith --recipient jane
+
+  # Auto-detect start, specify end manually
   nac-service-media process --end 01:45:00 --minister smith --recipient jane
 
-  # Specify start timestamp manually
+  # Specify both timestamps manually
   nac-service-media process --start 00:05:30 --end 01:45:00 --minister smith --recipient jane
 
   nac-service-media process \
@@ -79,15 +83,14 @@ func init() {
 	rootCmd.AddCommand(processCmd)
 	processCmd.Flags().StringVar(&processInputPath, "input", "", "Path to source video file (defaults to newest in source directory)")
 	processCmd.Flags().StringVar(&processStartTime, "start", "", "Start timestamp in HH:MM:SS format (auto-detected if omitted)")
-	processCmd.Flags().StringVar(&processEndTime, "end", "", "End timestamp in HH:MM:SS format (required)")
+	processCmd.Flags().StringVar(&processEndTime, "end", "", "End timestamp in HH:MM:SS format (auto-detected if omitted)")
 	processCmd.Flags().StringVar(&processMinisterKey, "minister", "", "Minister config key (required)")
 	processCmd.Flags().StringArrayVar(&processRecipientKeys, "recipient", nil, "Recipient config key(s) (required, can be repeated)")
 	processCmd.Flags().StringArrayVar(&processCCKeys, "cc", nil, "Additional CC config key(s) (optional)")
 	processCmd.Flags().StringVar(&processDateOverride, "date", "", "Override service date (YYYY-MM-DD)")
 	processCmd.Flags().StringVar(&processSenderKey, "sender", "", "Sender config key (defaults to config default_sender)")
 
-	// --start is now optional (auto-detected when omitted)
-	processCmd.MarkFlagRequired("end")
+	// --start and --end are now optional (auto-detected when omitted)
 	processCmd.MarkFlagRequired("minister")
 	processCmd.MarkFlagRequired("recipient")
 }
@@ -106,22 +109,22 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	fileChecker := filesystem.NewChecker()
 	fileFinder := &ProductionFileFinder{}
 
-	// Resolve video path for detection
+	// Resolve video path once (used for both detection types)
+	videoPath := processInputPath
+	if videoPath == "" {
+		// Find newest file
+		newest, err := fileFinder.FindNewestFile(cfg.Paths.SourceDirectory, ".mp4")
+		if err != nil {
+			return fmt.Errorf("failed to find video file: %w", err)
+		}
+		videoPath = newest
+	} else if !filepath.IsAbs(videoPath) {
+		videoPath = filepath.Join(cfg.Paths.SourceDirectory, videoPath)
+	}
+
+	// Detect start timestamp if not provided
 	startTime := processStartTime
 	if startTime == "" {
-		// Need to detect start timestamp
-		videoPath := processInputPath
-		if videoPath == "" {
-			// Find newest file
-			newest, err := fileFinder.FindNewestFile(cfg.Paths.SourceDirectory, ".mp4")
-			if err != nil {
-				return fmt.Errorf("failed to find video file: %w", err)
-			}
-			videoPath = newest
-		} else if !filepath.IsAbs(videoPath) {
-			videoPath = filepath.Join(cfg.Paths.SourceDirectory, videoPath)
-		}
-
 		// Check if detection is enabled
 		if !cfg.Detection.Enabled {
 			return fmt.Errorf("--start flag is required (auto-detection is disabled in config)")
@@ -133,6 +136,28 @@ func runProcess(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		startTime = detectedTime
+	}
+
+	// Detect end timestamp if not provided
+	endTime := processEndTime
+	if endTime == "" {
+		// Check if detection is enabled
+		if !cfg.Detection.Enabled {
+			return fmt.Errorf("--end flag is required (auto-detection is disabled in config)")
+		}
+
+		// Parse start time to get seconds for search window calculation
+		startTimestamp, err := video.ParseTimestamp(startTime)
+		if err != nil {
+			return fmt.Errorf("invalid start timestamp: %w", err)
+		}
+
+		// Run detection, searching from (startTime + offset) minutes into video
+		detectedTime, err := detectEndTimestamp(ctx, cfg, videoPath, startTimestamp.TotalSeconds())
+		if err != nil {
+			return err
+		}
+		endTime = detectedTime
 	}
 
 	// Create Drive client
@@ -157,7 +182,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	input := ProcessInput{
 		InputPath:     processInputPath,
 		StartTime:     startTime,
-		EndTime:       processEndTime,
+		EndTime:       endTime,
 		MinisterKey:   processMinisterKey,
 		RecipientKeys: processRecipientKeys,
 		CCKeys:        processCCKeys,
@@ -193,6 +218,22 @@ func detectStartTimestamp(ctx context.Context, cfg *config.Config, videoPath str
 	}
 
 	fmt.Fprintf(os.Stdout, "Using detected timestamp: %s\n\n", result.Timestamp)
+	return result.Timestamp, nil
+}
+
+// detectEndTimestamp runs the amen detection algorithm and returns the detected end timestamp
+// startTimeSeconds is the service start time used to calculate where to begin searching
+func detectEndTimestamp(ctx context.Context, cfg *config.Config, videoPath string, startTimeSeconds int) (string, error) {
+	// Create detection service
+	detectionService := appdetection.NewService(cfg.Detection, os.Stdout)
+
+	// Run detection, passing start time so it searches from (start + offset) minutes
+	result, err := detectionService.DetectEnd(ctx, videoPath, startTimeSeconds)
+	if err != nil {
+		return "", fmt.Errorf("end detection failed: %w\nUse --end to specify manually", err)
+	}
+
+	fmt.Fprintf(os.Stdout, "Using detected end timestamp: %s\n\n", result.Timestamp)
 	return result.Timestamp, nil
 }
 

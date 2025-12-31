@@ -38,7 +38,14 @@ test-availability-*.json
 *.mp4
 *.mp3
 cleanup_test
-scripts/
+
+# Script outputs and prototypes (keep only detect_amen.py and create_amen_template.py)
+scripts/*.png
+scripts/*prototype*.py
+scripts/*_v[0-9]*.py
+scripts/check_permissions/
+scripts/cleanup_test/
+scripts/cleanup_test_upload/
 
 # Thoughts symlink (managed separately)
 thoughts
