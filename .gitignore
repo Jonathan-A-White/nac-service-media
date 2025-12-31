@@ -35,6 +35,8 @@ Thumbs.db
 test-availability-*.json
 *.mp4
 *.mp3
+cleanup_test
+scripts/
 
 # Thoughts symlink (managed separately)
 thoughts
