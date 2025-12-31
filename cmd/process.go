@@ -1,14 +1,12 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	appdetection "nac-service-media/application/detection"
@@ -181,7 +179,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	)
 }
 
-// detectStartTimestamp runs the detection algorithm and prompts for user confirmation
+// detectStartTimestamp runs the detection algorithm and returns the detected timestamp
 func detectStartTimestamp(ctx context.Context, cfg *config.Config, videoPath string) (string, error) {
 	// Create detection service
 	detectionService := appdetection.NewService(cfg.Detection, os.Stdout)
@@ -191,60 +189,11 @@ func detectStartTimestamp(ctx context.Context, cfg *config.Config, videoPath str
 		VideoPath: videoPath,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stdout, "Could not auto-detect start timestamp: %v\n", err)
-		return promptForTimestamp("Enter start timestamp (HH:MM:SS): ")
+		return "", fmt.Errorf("auto-detection failed: %w\nUse --start to specify manually", err)
 	}
 
-	// Prompt for confirmation
-	return promptConfirmTimestamp(result.Timestamp, result.CameraAngle, result.Confidence)
-}
-
-// promptConfirmTimestamp asks the user to confirm or adjust a detected timestamp
-func promptConfirmTimestamp(timestamp, cameraAngle string, confidence float64) (string, error) {
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		fmt.Printf("Accept this timestamp? [Y/n/adjust]: ")
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return "", fmt.Errorf("failed to read input: %w", err)
-		}
-		input = strings.TrimSpace(strings.ToLower(input))
-
-		switch input {
-		case "", "y", "yes":
-			return timestamp, nil
-		case "n", "no":
-			return promptForTimestamp("Enter start timestamp (HH:MM:SS): ")
-		case "adjust", "a":
-			return promptForTimestamp("Enter adjusted timestamp (HH:MM:SS): ")
-		default:
-			// Check if they entered a timestamp directly
-			if _, err := video.ParseTimestamp(input); err == nil {
-				return input, nil
-			}
-			fmt.Println("Please enter Y, n, adjust, or a timestamp in HH:MM:SS format")
-		}
-	}
-}
-
-// promptForTimestamp asks the user to enter a timestamp
-func promptForTimestamp(prompt string) (string, error) {
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		fmt.Print(prompt)
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return "", fmt.Errorf("failed to read input: %w", err)
-		}
-		input = strings.TrimSpace(input)
-
-		if _, err := video.ParseTimestamp(input); err == nil {
-			return input, nil
-		}
-		fmt.Println("Invalid format. Please enter timestamp as HH:MM:SS (e.g., 00:24:05)")
-	}
+	fmt.Fprintf(os.Stdout, "Using detected timestamp: %s\n\n", result.Timestamp)
+	return result.Timestamp, nil
 }
 
 // ProcessInput contains the input parameters for process command
