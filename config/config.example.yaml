@@ -33,7 +33,7 @@ email:
       address: "you@example.com"
 
   # Quick-lookup recipients (use nickname when sending)
-  # Example: service-media send --to mom
+  # Example: nac-service-media send --to mom
   recipients:
     mom:
       name: "Mom Smith"

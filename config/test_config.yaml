@@ -1,0 +1,23 @@
+# Test configuration for BDD scenarios
+paths:
+  source_directory: "/test/source"
+  trimmed_directory: "/test/trimmed"
+  audio_directory: "/test/audio"
+
+audio:
+  bitrate: "192k"
+
+google:
+  credentials_file: "test_credentials.json"
+  services_folder_id: "test-folder-id"
+
+email:
+  from_name: "Test Church"
+  from_address: "test@example.com"
+  default_cc:
+    - name: "Test Admin"
+      address: "admin@example.com"
+  recipients:
+    tester:
+      name: "Test User"
+      address: "user@example.com"
