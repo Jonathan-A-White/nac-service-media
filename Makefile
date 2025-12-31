@@ -23,6 +23,7 @@ install-detection:
 install-deps:
 	sudo apt-get update
 	sudo apt-get install -y ffmpeg libopencv-dev libopencv-contrib-dev build-essential python3 python3-pip
+	go install github.com/mikefarah/yq/v4@latest
 
 # Install Python dependencies for end detection
 install-python-deps:
