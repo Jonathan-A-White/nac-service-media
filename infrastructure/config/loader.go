@@ -61,3 +61,17 @@ func Load(path string) (*Config, error) {
 
 	return &cfg, nil
 }
+
+// Save writes the configuration to the specified YAML file
+func Save(cfg *Config, path string) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to serialize config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
