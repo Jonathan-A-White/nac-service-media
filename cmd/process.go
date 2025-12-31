@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
+	appdetection "nac-service-media/application/detection"
 	appprocess "nac-service-media/application/process"
 	"nac-service-media/domain/distribution"
 	"nac-service-media/domain/notification"
@@ -37,15 +40,20 @@ var processCmd = &cobra.Command{
 	Use:   "process",
 	Short: "Process a service recording through the complete workflow",
 	Long: `Process a service recording through the complete automated workflow:
-1. Trim video to specified timestamps
-2. Extract audio as MP3
-3. Clean up old files from Google Drive if needed
-4. Upload video and audio to Google Drive
-5. Share files publicly
-6. Send email notification with links
+1. Detect or specify start timestamp (auto-detection when --start omitted)
+2. Trim video to specified timestamps
+3. Extract audio as MP3
+4. Clean up old files from Google Drive if needed
+5. Upload video and audio to Google Drive
+6. Share files publicly
+7. Send email notification with links
 
 The source video can be specified with --input, or the newest file in the
 source directory will be used by default.
+
+The start timestamp can be auto-detected (cross lighting up) when --start is
+omitted and detection.enabled is true in config. You will be prompted to
+confirm or adjust the detected timestamp.
 
 The service date is inferred from the filename (OBS format: YYYY-MM-DD HH-MM-SS.mp4),
 or can be specified with --date.
@@ -53,6 +61,10 @@ or can be specified with --date.
 Ministers, recipients, and CCs are looked up by their config keys.
 
 Example:
+  # Auto-detect start timestamp
+  nac-service-media process --end 01:45:00 --minister smith --recipient jane
+
+  # Specify start timestamp manually
   nac-service-media process --start 00:05:30 --end 01:45:00 --minister smith --recipient jane
 
   nac-service-media process \
@@ -68,7 +80,7 @@ Example:
 func init() {
 	rootCmd.AddCommand(processCmd)
 	processCmd.Flags().StringVar(&processInputPath, "input", "", "Path to source video file (defaults to newest in source directory)")
-	processCmd.Flags().StringVar(&processStartTime, "start", "", "Start timestamp in HH:MM:SS format (required)")
+	processCmd.Flags().StringVar(&processStartTime, "start", "", "Start timestamp in HH:MM:SS format (auto-detected if omitted)")
 	processCmd.Flags().StringVar(&processEndTime, "end", "", "End timestamp in HH:MM:SS format (required)")
 	processCmd.Flags().StringVar(&processMinisterKey, "minister", "", "Minister config key (required)")
 	processCmd.Flags().StringArrayVar(&processRecipientKeys, "recipient", nil, "Recipient config key(s) (required, can be repeated)")
@@ -76,7 +88,7 @@ func init() {
 	processCmd.Flags().StringVar(&processDateOverride, "date", "", "Override service date (YYYY-MM-DD)")
 	processCmd.Flags().StringVar(&processSenderKey, "sender", "", "Sender config key (defaults to config default_sender)")
 
-	processCmd.MarkFlagRequired("start")
+	// --start is now optional (auto-detected when omitted)
 	processCmd.MarkFlagRequired("end")
 	processCmd.MarkFlagRequired("minister")
 	processCmd.MarkFlagRequired("recipient")
@@ -94,6 +106,36 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	trimmer := ffmpeg.NewTrimmer()
 	extractor := ffmpeg.NewExtractor()
 	fileChecker := filesystem.NewChecker()
+	fileFinder := &ProductionFileFinder{}
+
+	// Resolve video path for detection
+	startTime := processStartTime
+	if startTime == "" {
+		// Need to detect start timestamp
+		videoPath := processInputPath
+		if videoPath == "" {
+			// Find newest file
+			newest, err := fileFinder.FindNewestFile(cfg.Paths.SourceDirectory, ".mp4")
+			if err != nil {
+				return fmt.Errorf("failed to find video file: %w", err)
+			}
+			videoPath = newest
+		} else if !filepath.IsAbs(videoPath) {
+			videoPath = filepath.Join(cfg.Paths.SourceDirectory, videoPath)
+		}
+
+		// Check if detection is enabled
+		if !cfg.Detection.Enabled {
+			return fmt.Errorf("--start flag is required (auto-detection is disabled in config)")
+		}
+
+		// Run detection
+		detectedTime, err := detectStartTimestamp(ctx, cfg, videoPath)
+		if err != nil {
+			return err
+		}
+		startTime = detectedTime
+	}
 
 	// Create Drive client
 	driveClient, err := drive.NewClientWithOAuth(ctx, cfg.Google.CredentialsFile, cfg.Google.TokenFile)
@@ -114,12 +156,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create Gmail client: %w", err)
 	}
 
-	// Create file finder
-	fileFinder := &ProductionFileFinder{}
-
 	input := ProcessInput{
 		InputPath:     processInputPath,
-		StartTime:     processStartTime,
+		StartTime:     startTime,
 		EndTime:       processEndTime,
 		MinisterKey:   processMinisterKey,
 		RecipientKeys: processRecipientKeys,
@@ -140,6 +179,72 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		input,
 		os.Stdout,
 	)
+}
+
+// detectStartTimestamp runs the detection algorithm and prompts for user confirmation
+func detectStartTimestamp(ctx context.Context, cfg *config.Config, videoPath string) (string, error) {
+	// Create detection service
+	detectionService := appdetection.NewService(cfg.Detection, os.Stdout)
+
+	// Run detection
+	result, err := detectionService.DetectStart(ctx, appdetection.DetectInput{
+		VideoPath: videoPath,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "Could not auto-detect start timestamp: %v\n", err)
+		return promptForTimestamp("Enter start timestamp (HH:MM:SS): ")
+	}
+
+	// Prompt for confirmation
+	return promptConfirmTimestamp(result.Timestamp, result.CameraAngle, result.Confidence)
+}
+
+// promptConfirmTimestamp asks the user to confirm or adjust a detected timestamp
+func promptConfirmTimestamp(timestamp, cameraAngle string, confidence float64) (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Printf("Accept this timestamp? [Y/n/adjust]: ")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("failed to read input: %w", err)
+		}
+		input = strings.TrimSpace(strings.ToLower(input))
+
+		switch input {
+		case "", "y", "yes":
+			return timestamp, nil
+		case "n", "no":
+			return promptForTimestamp("Enter start timestamp (HH:MM:SS): ")
+		case "adjust", "a":
+			return promptForTimestamp("Enter adjusted timestamp (HH:MM:SS): ")
+		default:
+			// Check if they entered a timestamp directly
+			if _, err := video.ParseTimestamp(input); err == nil {
+				return input, nil
+			}
+			fmt.Println("Please enter Y, n, adjust, or a timestamp in HH:MM:SS format")
+		}
+	}
+}
+
+// promptForTimestamp asks the user to enter a timestamp
+func promptForTimestamp(prompt string) (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Print(prompt)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("failed to read input: %w", err)
+		}
+		input = strings.TrimSpace(input)
+
+		if _, err := video.ParseTimestamp(input); err == nil {
+			return input, nil
+		}
+		fmt.Println("Invalid format. Please enter timestamp as HH:MM:SS (e.g., 00:24:05)")
+	}
 }
 
 // ProcessInput contains the input parameters for process command

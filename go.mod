@@ -8,6 +8,7 @@ require (
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/cucumber/godog v0.15.0
 	github.com/spf13/cobra v1.8.1
+	gocv.io/x/gocv v0.22.0
 	golang.org/x/oauth2 v0.34.0
 	google.golang.org/api v0.258.0
 	gopkg.in/yaml.v3 v3.0.1

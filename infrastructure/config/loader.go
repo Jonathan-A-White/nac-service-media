@@ -15,6 +15,27 @@ type Config struct {
 	Email     EmailConfig               `yaml:"email"`
 	Ministers map[string]MinisterConfig `yaml:"ministers,omitempty"`
 	Senders   SendersConfig             `yaml:"senders,omitempty"`
+	Detection DetectionConfig           `yaml:"detection,omitempty"`
+}
+
+// DetectionConfig contains settings for automatic timestamp detection
+type DetectionConfig struct {
+	Enabled      bool                      `yaml:"enabled"`
+	TemplatesDir string                    `yaml:"templates_dir"`
+	Thresholds   DetectionThresholdsConfig `yaml:"thresholds"`
+	SearchRange  SearchRangeConfig         `yaml:"search_range"`
+}
+
+// DetectionThresholdsConfig contains detection threshold settings
+type DetectionThresholdsConfig struct {
+	MatchScore       float64 `yaml:"match_score"`
+	CoarseStepSeconds int     `yaml:"coarse_step_seconds"`
+}
+
+// SearchRangeConfig contains the video time range to search for cross lighting
+type SearchRangeConfig struct {
+	StartMinutes int `yaml:"start_minutes"`
+	EndMinutes   int `yaml:"end_minutes"`
 }
 
 // SendersConfig contains sender configuration with default sender
