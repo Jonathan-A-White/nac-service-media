@@ -40,4 +40,5 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeUploadScenario(ctx)
 	steps.InitializeEmailScenario(ctx)
 	steps.InitializeConfigCrudScenario(ctx)
+	steps.InitializeProcessScenario(ctx)
 }
