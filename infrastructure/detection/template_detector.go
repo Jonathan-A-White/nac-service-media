@@ -57,6 +57,8 @@ func (d *TemplateDetector) LoadTemplates(templatesDir string) error {
 		"wide_unlit":    "wide_unlit.png",
 		"closeup_lit":   "closeup_lit.png",
 		"closeup_unlit": "closeup_unlit.png",
+		"medium_lit":    "medium_lit.png",
+		"medium_unlit":  "medium_unlit.png",
 	}
 
 	for name, filename := range templateFiles {
