@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	appvideo "nac-service-media/application/video"
@@ -28,8 +29,10 @@ var trimCmd = &cobra.Command{
 The source filename must be in OBS format: YYYY-MM-DD HH-MM-SS.mp4
 The output file will be named YYYY-MM-DD.mp4 in the configured trimmed directory.
 
+If --source is just a filename, it will be resolved from the configured source_directory.
+
 Example:
-  nac-service-media trim --source "/path/to/2025-12-28 10-06-16.mp4" --start "00:05:30" --end "01:45:00"`,
+  nac-service-media trim --source "2025-12-28 10-06-16.mp4" --start "00:05:30" --end "01:45:00"`,
 	RunE: runTrim,
 }
 
@@ -50,6 +53,12 @@ func runTrim(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("configuration not loaded; ensure config/config.yaml exists")
 	}
 
+	// Resolve source path - if not absolute, use source_directory from config
+	sourcePath := trimSourcePath
+	if !filepath.IsAbs(sourcePath) {
+		sourcePath = filepath.Join(cfg.Paths.SourceDirectory, sourcePath)
+	}
+
 	// Create dependencies using production implementations
 	trimmer := ffmpeg.NewTrimmer()
 	fileChecker := filesystem.NewChecker()
@@ -59,7 +68,7 @@ func runTrim(cmd *cobra.Command, args []string) error {
 		trimmer,
 		fileChecker,
 		cfg.Paths.TrimmedDirectory,
-		trimSourcePath,
+		sourcePath,
 		trimStartTime,
 		trimEndTime,
 		os.Stdout,
