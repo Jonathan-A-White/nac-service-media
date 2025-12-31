@@ -19,6 +19,9 @@ Feature: End-to-End Process Command
     And the process config has default CCs:
       | name       | address           |
       | Admin User | admin@example.com |
+    And the process config has senders:
+      | key    | name    | default |
+      | avteam | A/V Team | yes    |
 
   Scenario: Complete workflow with all required flags
     Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"

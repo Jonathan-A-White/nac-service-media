@@ -11,6 +11,7 @@ var (
 	ErrMinisterNotFound  = errors.New("minister not found")
 	ErrRecipientNotFound = errors.New("recipient not found")
 	ErrCCNotFound        = errors.New("cc not found")
+	ErrSenderNotFound    = errors.New("sender not found")
 	ErrDuplicateKey      = errors.New("key already exists")
 	ErrInvalidEmail      = errors.New("invalid email format")
 )
@@ -40,6 +41,12 @@ type Recipient struct {
 	Key     string
 	Name    string
 	Address string
+}
+
+// Sender represents a sender entry
+type Sender struct {
+	Key  string
+	Name string
 }
 
 // --- Minister CRUD ---
@@ -340,4 +347,104 @@ func SuggestAddRecipientCommand(key string) string {
 
 func SuggestAddCCCommand(key string) string {
 	return fmt.Sprintf(`nac-service-media config add cc --key %s --name "CC Name" --email "email@example.com"`, key)
+}
+
+func SuggestAddSenderCommand(key string) string {
+	return fmt.Sprintf(`nac-service-media config add sender --key %s --name "Sender Name"`, key)
+}
+
+// --- Sender CRUD ---
+
+// AddSender adds a new sender to config
+func (m *ConfigManager) AddSender(key, name string) error {
+	key = strings.ToLower(strings.TrimSpace(key))
+	name = strings.TrimSpace(name)
+
+	if key == "" {
+		return fmt.Errorf("sender key is required")
+	}
+	if name == "" {
+		return fmt.Errorf("sender name is required")
+	}
+
+	if m.config.Senders.Senders == nil {
+		m.config.Senders.Senders = make(map[string]SenderConfig)
+	}
+
+	if _, exists := m.config.Senders.Senders[key]; exists {
+		return fmt.Errorf("%w: sender %q", ErrDuplicateKey, key)
+	}
+
+	m.config.Senders.Senders[key] = SenderConfig{Name: name}
+	return Save(m.config, m.configPath)
+}
+
+// ListSenders returns all senders
+func (m *ConfigManager) ListSenders() []Sender {
+	result := make([]Sender, 0, len(m.config.Senders.Senders))
+	for key, sc := range m.config.Senders.Senders {
+		result = append(result, Sender{
+			Key:  key,
+			Name: sc.Name,
+		})
+	}
+	return result
+}
+
+// GetSender gets a sender by key (case-insensitive)
+func (m *ConfigManager) GetSender(key string) (Sender, error) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if sc, exists := m.config.Senders.Senders[key]; exists {
+		return Sender{Key: key, Name: sc.Name}, nil
+	}
+	return Sender{}, fmt.Errorf("%w: %q", ErrSenderNotFound, key)
+}
+
+// GetDefaultSender gets the default sender
+func (m *ConfigManager) GetDefaultSender() (Sender, error) {
+	if m.config.Senders.DefaultSender == "" {
+		return Sender{}, fmt.Errorf("no default sender configured")
+	}
+	return m.GetSender(m.config.Senders.DefaultSender)
+}
+
+// RemoveSender removes a sender by key
+func (m *ConfigManager) RemoveSender(key string) error {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if _, exists := m.config.Senders.Senders[key]; !exists {
+		return fmt.Errorf("%w: %q", ErrSenderNotFound, key)
+	}
+
+	delete(m.config.Senders.Senders, key)
+	return Save(m.config, m.configPath)
+}
+
+// UpdateSender updates a sender's name
+func (m *ConfigManager) UpdateSender(key, name string) error {
+	key = strings.ToLower(strings.TrimSpace(key))
+	name = strings.TrimSpace(name)
+
+	if _, exists := m.config.Senders.Senders[key]; !exists {
+		return fmt.Errorf("%w: %q", ErrSenderNotFound, key)
+	}
+
+	if name == "" {
+		return fmt.Errorf("sender name is required")
+	}
+
+	m.config.Senders.Senders[key] = SenderConfig{Name: name}
+	return Save(m.config, m.configPath)
+}
+
+// SetDefaultSender sets the default sender key
+func (m *ConfigManager) SetDefaultSender(key string) error {
+	key = strings.ToLower(strings.TrimSpace(key))
+
+	// Verify sender exists
+	if _, exists := m.config.Senders.Senders[key]; !exists {
+		return fmt.Errorf("%w: %q", ErrSenderNotFound, key)
+	}
+
+	m.config.Senders.DefaultSender = key
+	return Save(m.config, m.configPath)
 }

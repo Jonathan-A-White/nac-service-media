@@ -83,6 +83,15 @@ func InitializeConfigCrudScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the config should contain cc with name "([^"]*)" and email "([^"]*)"$`, testCtx.theConfigShouldContainCC)
 	ctx.Step(`^the config should not contain cc with name "([^"]*)"$`, testCtx.theConfigShouldNotContainCC)
 
+	// Sender steps
+	ctx.Step(`^I run config add sender with key "([^"]*)" and name "([^"]*)"$`, testCtx.iRunConfigAddSender)
+	ctx.Step(`^sender "([^"]*)" exists with name "([^"]*)"$`, testCtx.senderExistsWithName)
+	ctx.Step(`^I run config list senders$`, testCtx.iRunConfigListSenders)
+	ctx.Step(`^I run config remove sender "([^"]*)"$`, testCtx.iRunConfigRemoveSender)
+	ctx.Step(`^I run config update sender "([^"]*)" with name "([^"]*)"$`, testCtx.iRunConfigUpdateSender)
+	ctx.Step(`^the config should contain sender "([^"]*)" with name "([^"]*)"$`, testCtx.theConfigShouldContainSender)
+	ctx.Step(`^the config should not contain sender "([^"]*)"$`, testCtx.theConfigShouldNotContainSender)
+
 	// Common assertions
 	ctx.Step(`^the command should succeed$`, testCtx.theCommandShouldSucceed)
 	ctx.Step(`^the command should fail with "([^"]*)"$`, testCtx.theCommandShouldFailWith)
@@ -389,6 +398,81 @@ func (c *configCrudContext) theOutputShouldContain(expected string) error {
 	output := c.output.String()
 	if !strings.Contains(output, expected) {
 		return fmt.Errorf("expected output to contain %q but got:\n%s", expected, output)
+	}
+	return nil
+}
+
+// --- Sender steps ---
+
+func (c *configCrudContext) iRunConfigAddSender(key, name string) error {
+	if err := c.loadConfig(); err != nil {
+		return err
+	}
+	c.output.Reset()
+	c.err = cmd.RunConfigAddWithDependencies(c.config, c.configPath, "sender", key, name, "", c.output)
+	return nil
+}
+
+func (c *configCrudContext) senderExistsWithName(key, name string) error {
+	if err := c.loadConfig(); err != nil {
+		return err
+	}
+	if c.config.Senders.Senders == nil {
+		c.config.Senders.Senders = make(map[string]config.SenderConfig)
+	}
+	c.config.Senders.Senders[strings.ToLower(key)] = config.SenderConfig{Name: name}
+	return c.saveConfig()
+}
+
+func (c *configCrudContext) iRunConfigListSenders() error {
+	if err := c.loadConfig(); err != nil {
+		return err
+	}
+	c.output.Reset()
+	c.err = cmd.RunConfigListWithDependencies(c.config, c.configPath, "senders", c.output)
+	return nil
+}
+
+func (c *configCrudContext) iRunConfigRemoveSender(key string) error {
+	if err := c.loadConfig(); err != nil {
+		return err
+	}
+	c.output.Reset()
+	c.err = cmd.RunConfigRemoveWithDependencies(c.config, c.configPath, "sender", key, c.output)
+	return nil
+}
+
+func (c *configCrudContext) iRunConfigUpdateSender(key, name string) error {
+	if err := c.loadConfig(); err != nil {
+		return err
+	}
+	c.output.Reset()
+	c.err = cmd.RunConfigUpdateWithDependencies(c.config, c.configPath, "sender", key, name, "", c.output)
+	return nil
+}
+
+func (c *configCrudContext) theConfigShouldContainSender(key, name string) error {
+	if err := c.loadConfig(); err != nil {
+		return err
+	}
+	key = strings.ToLower(key)
+	s, exists := c.config.Senders.Senders[key]
+	if !exists {
+		return fmt.Errorf("sender %q not found in config", key)
+	}
+	if s.Name != name {
+		return fmt.Errorf("expected sender %q to have name %q, got %q", key, name, s.Name)
+	}
+	return nil
+}
+
+func (c *configCrudContext) theConfigShouldNotContainSender(key string) error {
+	if err := c.loadConfig(); err != nil {
+		return err
+	}
+	key = strings.ToLower(key)
+	if _, exists := c.config.Senders.Senders[key]; exists {
+		return fmt.Errorf("sender %q should not exist in config", key)
 	}
 	return nil
 }

@@ -17,11 +17,12 @@ import (
 )
 
 var (
-	emailTo       []string
-	emailDate     string
-	emailMinister string
-	emailAudioURL string
-	emailVideoURL string
+	emailTo        []string
+	emailDate      string
+	emailMinister  string
+	emailAudioURL  string
+	emailVideoURL  string
+	emailSenderKey string
 )
 
 var sendEmailCmd = &cobra.Command{
@@ -51,6 +52,7 @@ func init() {
 	sendEmailCmd.Flags().StringVar(&emailMinister, "minister", "", "Minister's name (e.g., 'Pr. Henkel')")
 	sendEmailCmd.Flags().StringVar(&emailAudioURL, "audio-url", "", "Google Drive URL for audio file")
 	sendEmailCmd.Flags().StringVar(&emailVideoURL, "video-url", "", "Google Drive URL for video file")
+	sendEmailCmd.Flags().StringVar(&emailSenderKey, "sender", "", "Sender config key (defaults to config default_sender)")
 
 	sendEmailCmd.MarkFlagRequired("to")
 	sendEmailCmd.MarkFlagRequired("date")
@@ -84,6 +86,23 @@ func runSendEmail(cmd *cobra.Command, args []string) error {
 	// Get default CC
 	ccRecipients := lookup.GetDefaultCC()
 
+	// Lookup sender
+	mgr := config.NewConfigManager(cfg, cfgFile)
+	var senderName string
+	if emailSenderKey != "" {
+		sender, err := mgr.GetSender(emailSenderKey)
+		if err != nil {
+			return fmt.Errorf("sender '%s' not found in config\n\nTo fix this, run:\n  %s", emailSenderKey, config.SuggestAddSenderCommand(emailSenderKey))
+		}
+		senderName = sender.Name
+	} else {
+		sender, err := mgr.GetDefaultSender()
+		if err != nil {
+			return fmt.Errorf("no default sender configured. Either specify --sender or set senders.default_sender in config")
+		}
+		senderName = sender.Name
+	}
+
 	// Create Gmail client with OAuth
 	ctx := cmd.Context()
 	from := notification.Recipient{
@@ -105,7 +124,7 @@ func runSendEmail(cmd *cobra.Command, args []string) error {
 		ctx,
 		gmailClient,
 		cfg.Email.FromName, // Church name (used in subject)
-		"Jonathan",         // Sender name (for signature)
+		senderName,         // Sender name (for signature)
 		recipients,
 		ccRecipients,
 		serviceDate,

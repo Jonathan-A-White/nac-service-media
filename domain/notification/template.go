@@ -37,11 +37,11 @@ Audio: {{.AudioURL}}
 Video: {{.VideoURL}}
 
 Thanks!
-~{{.SenderName}}`,
+{{.SenderName}}`,
 	HTML: `<div dir="ltr">{{.Greeting}}<br><br>
 Here is the <a href="{{.AudioURL}}">audio</a> and <a href="{{.VideoURL}}">video</a> from {{.ServiceRef}} service with {{.MinisterName}}.<br><br>
 Thanks!<br>
-~{{.SenderName}}</div>`,
+{{.SenderName}}</div>`,
 }
 
 // FormatGreeting creates an appropriate greeting based on number of recipients

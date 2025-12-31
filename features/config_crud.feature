@@ -138,6 +138,53 @@ Feature: Config CRUD Commands
     Then the command should succeed
     And the config should contain cc with name "Mary Jones" and email "mary.new@example.com"
 
+  # Sender CRUD
+
+  Scenario: Add a sender
+    When I run config add sender with key "avteam" and name "White Plains NAC A/V Team"
+    Then the command should succeed
+    And the config should contain sender "avteam" with name "White Plains NAC A/V Team"
+
+  Scenario: Add duplicate sender fails
+    Given sender "avteam" exists with name "A/V Team"
+    When I run config add sender with key "avteam" and name "Another Team"
+    Then the command should fail with "key already exists"
+
+  Scenario: List senders
+    Given sender "avteam" exists with name "A/V Team"
+    And sender "jonathan" exists with name "Jonathan White"
+    When I run config list senders
+    Then the command should succeed
+    And the output should contain "avteam"
+    And the output should contain "A/V Team"
+    And the output should contain "jonathan"
+    And the output should contain "Jonathan White"
+
+  Scenario: List senders when none exist
+    When I run config list senders
+    Then the command should succeed
+    And the output should contain "No senders configured"
+
+  Scenario: Remove a sender
+    Given sender "avteam" exists with name "A/V Team"
+    When I run config remove sender "avteam"
+    Then the command should succeed
+    And the config should not contain sender "avteam"
+
+  Scenario: Remove non-existent sender fails
+    When I run config remove sender "notfound"
+    Then the command should fail with "sender not found"
+
+  Scenario: Update a sender
+    Given sender "avteam" exists with name "A/V Team"
+    When I run config update sender "avteam" with name "White Plains A/V Team"
+    Then the command should succeed
+    And the config should contain sender "avteam" with name "White Plains A/V Team"
+
+  Scenario: Update non-existent sender fails
+    When I run config update sender "notfound" with name "New Name"
+    Then the command should fail with "sender not found"
+
   # Key case-insensitivity
 
   Scenario: Keys are case-insensitive for lookup

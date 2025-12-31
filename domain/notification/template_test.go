@@ -43,7 +43,7 @@ func TestEmailTemplate_RenderPlainText(t *testing.T) {
 		"Pr. Smith",
 		"https://drive.google.com/file/d/abc/view",
 		"https://drive.google.com/file/d/xyz/view",
-		"~Jonathan",
+		"Thanks!\nJonathan",
 	}
 
 	for _, check := range checks {

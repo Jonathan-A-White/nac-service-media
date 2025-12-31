@@ -75,6 +75,7 @@ type Input struct {
 	RecipientKeys []string // Recipient config keys
 	CCKeys        []string // CC config keys (optional)
 	DateOverride  string   // Override service date (YYYY-MM-DD)
+	SenderKey     string   // Sender config key (optional, uses default if empty)
 }
 
 // Result contains the results of a successful process run
@@ -104,7 +105,7 @@ func (s *Service) Process(ctx context.Context, input Input) (*Result, error) {
 	startTime := time.Now()
 
 	// Step 0: Validate all inputs before starting
-	sourcePath, serviceDate, recipients, ccRecipients, ministerName, err := s.validateInputs(input)
+	sourcePath, serviceDate, recipients, ccRecipients, ministerName, senderName, err := s.validateInputs(input)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +175,7 @@ func (s *Service) Process(ctx context.Context, input Input) (*Result, error) {
 
 	// Step 7: Send email
 	fmt.Fprintf(s.output, "[7/7] Sending email...\n")
-	err = s.sendEmail(recipients, ccRecipients, serviceDate, ministerName, audioUploadResult.ShareableURL, videoUploadResult.ShareableURL)
+	err = s.sendEmail(recipients, ccRecipients, serviceDate, ministerName, senderName, audioUploadResult.ShareableURL, videoUploadResult.ShareableURL)
 	if err != nil {
 		s.showRecoveryCommands(7, input, sourcePath, serviceDate)
 		return nil, fmt.Errorf("email failed: %w", err)
@@ -196,7 +197,7 @@ func (s *Service) Process(ctx context.Context, input Input) (*Result, error) {
 	}, nil
 }
 
-func (s *Service) validateInputs(input Input) (sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName string, err error) {
+func (s *Service) validateInputs(input Input) (sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName, senderName string, err error) {
 	// Resolve source path
 	sourcePath = input.InputPath
 	if sourcePath == "" {
@@ -276,6 +277,30 @@ func (s *Service) validateInputs(input Input) (sourcePath string, serviceDate ti
 		ccRecipients = append(ccRecipients, ccMatches...)
 	}
 
+	// Lookup sender
+	mgr := config.NewConfigManager(s.cfg, "")
+	if input.SenderKey != "" {
+		sender, senderErr := mgr.GetSender(input.SenderKey)
+		if senderErr != nil {
+			err = &ValidationError{
+				Message:    fmt.Sprintf("sender '%s' not found in config", input.SenderKey),
+				Suggestion: config.SuggestAddSenderCommand(input.SenderKey),
+			}
+			return
+		}
+		senderName = sender.Name
+	} else {
+		sender, senderErr := mgr.GetDefaultSender()
+		if senderErr != nil {
+			err = &ValidationError{
+				Message:    "no default sender configured",
+				Suggestion: "Set senders.default_sender in config or use --sender flag",
+			}
+			return
+		}
+		senderName = sender.Name
+	}
+
 	return
 }
 
@@ -316,8 +341,8 @@ func (s *Service) uploadAudio(ctx context.Context, audioPath string) (*distribut
 	return uploadService.UploadAudio(ctx, audioPath)
 }
 
-func (s *Service) sendEmail(recipients, ccRecipients []notification.Recipient, serviceDate time.Time, ministerName, audioURL, videoURL string) error {
-	notifService := appnotif.NewService(s.emailSender, s.cfg.Email.FromName, "Jonathan")
+func (s *Service) sendEmail(recipients, ccRecipients []notification.Recipient, serviceDate time.Time, ministerName, senderName, audioURL, videoURL string) error {
+	notifService := appnotif.NewService(s.emailSender, s.cfg.Email.FromName, senderName)
 	return notifService.Send(appnotif.SendRequest{
 		To:           recipients,
 		CC:           ccRecipients,

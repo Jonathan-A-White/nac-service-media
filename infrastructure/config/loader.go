@@ -9,11 +9,23 @@ import (
 
 // Config represents the complete application configuration
 type Config struct {
-	Paths     PathsConfig              `yaml:"paths"`
-	Audio     AudioConfig              `yaml:"audio"`
-	Google    GoogleConfig             `yaml:"google"`
-	Email     EmailConfig              `yaml:"email"`
+	Paths     PathsConfig               `yaml:"paths"`
+	Audio     AudioConfig               `yaml:"audio"`
+	Google    GoogleConfig              `yaml:"google"`
+	Email     EmailConfig               `yaml:"email"`
 	Ministers map[string]MinisterConfig `yaml:"ministers,omitempty"`
+	Senders   SendersConfig             `yaml:"senders,omitempty"`
+}
+
+// SendersConfig contains sender configuration with default sender
+type SendersConfig struct {
+	DefaultSender string                  `yaml:"default_sender"`
+	Senders       map[string]SenderConfig `yaml:"senders,omitempty"`
+}
+
+// SenderConfig represents a sender's information
+type SenderConfig struct {
+	Name string `yaml:"name"`
 }
 
 // MinisterConfig represents a minister's information

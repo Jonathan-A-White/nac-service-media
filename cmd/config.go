@@ -17,11 +17,12 @@ var DefaultOutput OutputWriter = os.Stdout
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage configuration entries",
-	Long: `Manage ministers, recipients, and CC recipients in the configuration file.
+	Long: `Manage ministers, recipients, CC recipients, and senders in the configuration file.
 
 Examples:
   nac-service-media config list ministers
   nac-service-media config add minister --key smith --name "Rev. John Smith"
+  nac-service-media config add sender --key avteam --name "A/V Team"
   nac-service-media config remove recipient jane`,
 }
 
@@ -44,14 +45,15 @@ var (
 )
 
 var configAddCmd = &cobra.Command{
-	Use:   "add [minister|recipient|cc]",
+	Use:   "add [minister|recipient|cc|sender]",
 	Short: "Add a new config entry",
-	Long: `Add a new minister, recipient, or CC to the configuration.
+	Long: `Add a new minister, recipient, CC, or sender to the configuration.
 
 Examples:
   nac-service-media config add minister --key smith --name "Rev. John Smith"
   nac-service-media config add recipient --key jane --name "Jane Doe" --email "jane@example.com"
-  nac-service-media config add cc --key mary --name "Mary Jones" --email "mary@example.com"`,
+  nac-service-media config add cc --key mary --name "Mary Jones" --email "mary@example.com"
+  nac-service-media config add sender --key avteam --name "White Plains NAC A/V Team"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runConfigAdd,
 }
@@ -102,8 +104,14 @@ func RunConfigAddWithDependencies(cfg *config.Config, configPath, entityType, ke
 		}
 		fmt.Fprintf(out, "Added CC %q: %s <%s>\n", key, name, email)
 
+	case "sender":
+		if err := mgr.AddSender(key, name); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Added sender %q: %s\n", key, name)
+
 	default:
-		return fmt.Errorf("unknown entity type %q. Use minister, recipient, or cc", entityType)
+		return fmt.Errorf("unknown entity type %q. Use minister, recipient, cc, or sender", entityType)
 	}
 
 	return nil
@@ -112,14 +120,15 @@ func RunConfigAddWithDependencies(cfg *config.Config, configPath, entityType, ke
 // --- LIST command ---
 
 var configListCmd = &cobra.Command{
-	Use:   "list [ministers|recipients|ccs]",
+	Use:   "list [ministers|recipients|ccs|senders]",
 	Short: "List config entries",
-	Long: `List all ministers, recipients, or CC recipients.
+	Long: `List all ministers, recipients, CC recipients, or senders.
 
 Examples:
   nac-service-media config list ministers
   nac-service-media config list recipients
-  nac-service-media config list ccs`,
+  nac-service-media config list ccs
+  nac-service-media config list senders`,
 	Args: cobra.ExactArgs(1),
 	RunE: runConfigList,
 }
@@ -180,8 +189,29 @@ func RunConfigListWithDependencies(cfg *config.Config, configPath, entityType st
 			fmt.Fprintf(w, "%s\t%s\t%s\n", c.Key, c.Name, c.Address)
 		}
 
+	case "senders":
+		senders := mgr.ListSenders()
+		if len(senders) == 0 {
+			fmt.Fprintln(out, "No senders configured.")
+			return nil
+		}
+		// Sort by key for consistent output
+		sort.Slice(senders, func(i, j int) bool {
+			return senders[i].Key < senders[j].Key
+		})
+		// Show default indicator
+		defaultSender := cfg.Senders.DefaultSender
+		fmt.Fprintln(w, "KEY\tNAME\tDEFAULT")
+		for _, s := range senders {
+			isDefault := ""
+			if s.Key == defaultSender {
+				isDefault = "*"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\n", s.Key, s.Name, isDefault)
+		}
+
 	default:
-		return fmt.Errorf("unknown entity type %q. Use ministers, recipients, or ccs", entityType)
+		return fmt.Errorf("unknown entity type %q. Use ministers, recipients, ccs, or senders", entityType)
 	}
 
 	return w.Flush()
@@ -190,14 +220,15 @@ func RunConfigListWithDependencies(cfg *config.Config, configPath, entityType st
 // --- REMOVE command ---
 
 var configRemoveCmd = &cobra.Command{
-	Use:   "remove [minister|recipient|cc] <key>",
+	Use:   "remove [minister|recipient|cc|sender] <key>",
 	Short: "Remove a config entry",
-	Long: `Remove a minister, recipient, or CC from the configuration.
+	Long: `Remove a minister, recipient, CC, or sender from the configuration.
 
 Examples:
   nac-service-media config remove minister smith
   nac-service-media config remove recipient jane
-  nac-service-media config remove cc mary`,
+  nac-service-media config remove cc mary
+  nac-service-media config remove sender avteam`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigRemove,
 }
@@ -234,8 +265,14 @@ func RunConfigRemoveWithDependencies(cfg *config.Config, configPath, entityType,
 		}
 		fmt.Fprintf(out, "Removed CC %q\n", key)
 
+	case "sender":
+		if err := mgr.RemoveSender(key); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Removed sender %q\n", key)
+
 	default:
-		return fmt.Errorf("unknown entity type %q. Use minister, recipient, or cc", entityType)
+		return fmt.Errorf("unknown entity type %q. Use minister, recipient, cc, or sender", entityType)
 	}
 
 	return nil
@@ -249,14 +286,15 @@ var (
 )
 
 var configUpdateCmd = &cobra.Command{
-	Use:   "update [minister|recipient|cc] <key>",
+	Use:   "update [minister|recipient|cc|sender] <key>",
 	Short: "Update a config entry",
-	Long: `Update an existing minister, recipient, or CC in the configuration.
+	Long: `Update an existing minister, recipient, CC, or sender in the configuration.
 
 Examples:
   nac-service-media config update minister smith --name "Rev. John H. Smith"
   nac-service-media config update recipient jane --email "jane.new@example.com"
-  nac-service-media config update cc mary --name "Mary Smith" --email "mary.smith@example.com"`,
+  nac-service-media config update cc mary --name "Mary Smith" --email "mary.smith@example.com"
+  nac-service-media config update sender avteam --name "White Plains A/V Team"`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigUpdate,
 }
@@ -305,8 +343,17 @@ func RunConfigUpdateWithDependencies(cfg *config.Config, configPath, entityType,
 		}
 		fmt.Fprintf(out, "Updated CC %q\n", key)
 
+	case "sender":
+		if name == "" {
+			return fmt.Errorf("--name is required for sender update")
+		}
+		if err := mgr.UpdateSender(key, name); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Updated sender %q\n", key)
+
 	default:
-		return fmt.Errorf("unknown entity type %q. Use minister, recipient, or cc", entityType)
+		return fmt.Errorf("unknown entity type %q. Use minister, recipient, cc, or sender", entityType)
 	}
 
 	return nil

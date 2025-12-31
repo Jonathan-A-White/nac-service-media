@@ -354,6 +354,7 @@ func InitializeProcessScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the process config has ministers:$`, theProcessConfigHasMinisters)
 	ctx.Step(`^the process config has recipients:$`, theProcessConfigHasRecipients)
 	ctx.Step(`^the process config has default CCs:$`, theProcessConfigHasDefaultCCs)
+	ctx.Step(`^the process config has senders:$`, theProcessConfigHasSenders)
 
 	// Source file steps
 	ctx.Step(`^a source video exists at "([^"]*)"$`, aSourceVideoExistsAtProcess)
@@ -441,6 +442,26 @@ func theProcessConfigHasDefaultCCs(table *godog.Table) error {
 		name := row.Cells[0].Value
 		address := row.Cells[1].Value
 		p.cfg.Email.DefaultCC = append(p.cfg.Email.DefaultCC, config.RecipientConfig{Name: name, Address: address})
+	}
+	return nil
+}
+
+func theProcessConfigHasSenders(table *godog.Table) error {
+	p := getProcessContext()
+	if p.cfg.Senders.Senders == nil {
+		p.cfg.Senders.Senders = make(map[string]config.SenderConfig)
+	}
+	for i, row := range table.Rows {
+		if i == 0 {
+			continue // Skip header
+		}
+		key := row.Cells[0].Value
+		name := row.Cells[1].Value
+		isDefault := len(row.Cells) > 2 && row.Cells[2].Value == "yes"
+		p.cfg.Senders.Senders[key] = config.SenderConfig{Name: name}
+		if isDefault {
+			p.cfg.Senders.DefaultSender = key
+		}
 	}
 	return nil
 }

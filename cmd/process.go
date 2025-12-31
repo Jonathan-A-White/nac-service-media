@@ -30,6 +30,7 @@ var (
 	processRecipientKeys []string
 	processCCKeys        []string
 	processDateOverride  string
+	processSenderKey     string
 )
 
 var processCmd = &cobra.Command{
@@ -59,7 +60,8 @@ Example:
     --start 00:05:30 \
     --end 01:45:00 \
     --minister smith \
-    --recipient jane --recipient john`,
+    --recipient jane --recipient john \
+    --sender avteam`,
 	RunE: runProcess,
 }
 
@@ -72,6 +74,7 @@ func init() {
 	processCmd.Flags().StringArrayVar(&processRecipientKeys, "recipient", nil, "Recipient config key(s) (required, can be repeated)")
 	processCmd.Flags().StringArrayVar(&processCCKeys, "cc", nil, "Additional CC config key(s) (optional)")
 	processCmd.Flags().StringVar(&processDateOverride, "date", "", "Override service date (YYYY-MM-DD)")
+	processCmd.Flags().StringVar(&processSenderKey, "sender", "", "Sender config key (defaults to config default_sender)")
 
 	processCmd.MarkFlagRequired("start")
 	processCmd.MarkFlagRequired("end")
@@ -122,6 +125,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		RecipientKeys: processRecipientKeys,
 		CCKeys:        processCCKeys,
 		DateOverride:  processDateOverride,
+		SenderKey:     processSenderKey,
 	}
 
 	return runProcessWithClients(
@@ -147,6 +151,7 @@ type ProcessInput struct {
 	RecipientKeys []string
 	CCKeys        []string
 	DateOverride  string
+	SenderKey     string
 }
 
 // FileFinder interface for finding files (allows testing)
@@ -240,6 +245,7 @@ func runProcessWithClients(
 		RecipientKeys: input.RecipientKeys,
 		CCKeys:        input.CCKeys,
 		DateOverride:  input.DateOverride,
+		SenderKey:     input.SenderKey,
 	}
 
 	_, err := service.Process(ctx, processInput)
@@ -307,6 +313,7 @@ func RunProcessWithDependencies(
 		RecipientKeys: input.RecipientKeys,
 		CCKeys:        input.CCKeys,
 		DateOverride:  input.DateOverride,
+		SenderKey:     input.SenderKey,
 	}
 
 	_, err = service.Process(ctx, processInput)
