@@ -35,4 +35,5 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeSetupScenario(ctx)
 	steps.InitializeTrimScenario(ctx)
 	steps.InitializeExtractScenario(ctx)
+	steps.InitializeDriveScenario(ctx)
 }
