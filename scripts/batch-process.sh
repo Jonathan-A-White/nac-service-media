@@ -88,6 +88,7 @@ echo ""
 # Counters
 processed=0
 skipped=0
+skipped_smaller=0
 failed=0
 failed_files=()
 
@@ -102,7 +103,10 @@ if [[ ${#mp4_files[@]} -eq 0 ]]; then
 fi
 
 echo "Found ${#mp4_files[@]} source file(s)"
-echo ""
+
+# Build associative array: date -> largest file for that date
+declare -A largest_file_for_date
+declare -A largest_size_for_date
 
 for mp4_file in "${mp4_files[@]}"; do
     filename=$(basename "$mp4_file")
@@ -112,22 +116,40 @@ for mp4_file in "${mp4_files[@]}"; do
 
     # Validate date format
     if ! [[ "$date_part" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-        echo "⚠️  Skipping $filename (cannot extract date from filename)"
-        ((skipped++)) || true
         continue
     fi
+
+    # Get file size
+    file_size=$(stat -c%s "$mp4_file" 2>/dev/null || stat -f%z "$mp4_file" 2>/dev/null || echo 0)
+
+    # Check if this is the largest file for this date
+    if [[ -z "${largest_size_for_date[$date_part]:-}" ]] || [[ "$file_size" -gt "${largest_size_for_date[$date_part]}" ]]; then
+        largest_file_for_date[$date_part]="$mp4_file"
+        largest_size_for_date[$date_part]="$file_size"
+    fi
+done
+
+# Get unique dates sorted
+dates=($(echo "${!largest_file_for_date[@]}" | tr ' ' '\n' | sort))
+
+echo "Found ${#dates[@]} unique date(s)"
+echo ""
+
+for date_part in "${dates[@]}"; do
+    mp4_file="${largest_file_for_date[$date_part]}"
+    filename=$(basename "$mp4_file")
 
     # Check if corresponding audio file exists
     audio_file="$AUDIO_DIR/$date_part.mp3"
 
     if [[ -f "$audio_file" ]]; then
-        echo "⏭️  Skipping $filename (already processed: $date_part.mp3 exists)"
+        echo "⏭️  Skipping $date_part (already processed: $date_part.mp3 exists)"
         ((skipped++)) || true
         continue
     fi
 
     # Process this file
-    echo "🎬 Processing: $filename"
+    echo "🎬 Processing: $filename (largest for $date_part)"
 
     if [[ "$DRY_RUN" == "true" ]]; then
         echo "   [DRY RUN] Would run: $BINARY process --input \"$mp4_file\" --recipient $RECIPIENT --skip-video"
