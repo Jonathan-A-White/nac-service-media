@@ -33,4 +33,5 @@ func TestFeatures(t *testing.T) {
 func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeConfigScenario(ctx)
 	steps.InitializeSetupScenario(ctx)
+	steps.InitializeTrimScenario(ctx)
 }
