@@ -52,7 +52,7 @@ func TestRealDriveConnectivity(t *testing.T) {
 // This test uploads a small test file, verifies sharing works, then deletes it
 func TestRealDriveUploadAndShare(t *testing.T) {
 	credentialsPath := "../../oauth_credentials.json"
-	tokenPath := "../../token.json"
+	tokenPath := "../../drive_token.json"
 	folderID := "1dPV078FlLsWUFGjjoq3-epJiY_tBGXC8" // Services folder from epic
 
 	// Check credentials file exists
@@ -116,7 +116,7 @@ func TestRealDriveUploadAndShare(t *testing.T) {
 // Note: This uploads the actual test video, so use with caution!
 func TestRealDriveUploadVideo(t *testing.T) {
 	credentialsPath := "../../oauth_credentials.json"
-	tokenPath := "../../token.json"
+	tokenPath := "../../drive_token.json"
 	folderID := "1dPV078FlLsWUFGjjoq3-epJiY_tBGXC8" // Services folder from epic
 
 	// Use the real trimmed video from test data

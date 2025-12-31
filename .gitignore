@@ -4,7 +4,7 @@ config.yaml
 # Google credentials
 credentials.json
 oauth_credentials.json
-token.json
+drive_token.json
 gmail_token.json
 
 # Build output
