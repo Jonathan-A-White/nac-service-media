@@ -19,6 +19,7 @@ var (
 	trimSourcePath string
 	trimStartTime  string
 	trimEndTime    string
+	trimWithAudio  bool
 )
 
 var trimCmd = &cobra.Command{
@@ -31,8 +32,11 @@ The output file will be named YYYY-MM-DD.mp4 in the configured trimmed directory
 
 If --source is just a filename, it will be resolved from the configured source_directory.
 
+Use --with-audio to also extract audio as MP3 after trimming.
+
 Example:
-  nac-service-media trim --source "2025-12-28 10-06-16.mp4" --start "00:05:30" --end "01:45:00"`,
+  nac-service-media trim --source "2025-12-28 10-06-16.mp4" --start "00:05:30" --end "01:45:00"
+  nac-service-media trim --source "2025-12-28 10-06-16.mp4" --start "00:05:30" --end "01:45:00" --with-audio`,
 	RunE: runTrim,
 }
 
@@ -41,6 +45,7 @@ func init() {
 	trimCmd.Flags().StringVar(&trimSourcePath, "source", "", "Path to source video file (required)")
 	trimCmd.Flags().StringVar(&trimStartTime, "start", "", "Start timestamp in HH:MM:SS format (required)")
 	trimCmd.Flags().StringVar(&trimEndTime, "end", "", "End timestamp in HH:MM:SS format (required)")
+	trimCmd.Flags().BoolVar(&trimWithAudio, "with-audio", false, "Also extract audio as MP3 after trimming")
 	trimCmd.MarkFlagRequired("source")
 	trimCmd.MarkFlagRequired("start")
 	trimCmd.MarkFlagRequired("end")
@@ -63,6 +68,19 @@ func runTrim(cmd *cobra.Command, args []string) error {
 	trimmer := ffmpeg.NewTrimmer()
 	fileChecker := filesystem.NewChecker()
 
+	// Audio extraction dependencies (only used if --with-audio)
+	var extractor video.AudioExtractor
+	var audioOutputDir string
+	var audioBitrate string
+	if trimWithAudio {
+		extractor = ffmpeg.NewExtractor()
+		audioOutputDir = cfg.Paths.AudioDirectory
+		audioBitrate = cfg.Audio.Bitrate
+		if audioBitrate == "" {
+			audioBitrate = video.DefaultAudioBitrate
+		}
+	}
+
 	return RunTrimWithDependencies(
 		cmd.Context(),
 		trimmer,
@@ -71,6 +89,9 @@ func runTrim(cmd *cobra.Command, args []string) error {
 		sourcePath,
 		trimStartTime,
 		trimEndTime,
+		extractor,
+		audioOutputDir,
+		audioBitrate,
 		os.Stdout,
 	)
 }
@@ -81,6 +102,7 @@ type OutputWriter interface {
 }
 
 // RunTrimWithDependencies runs the trim command with injected dependencies (for testing)
+// If extractor is non-nil, audio will also be extracted after trimming
 func RunTrimWithDependencies(
 	ctx context.Context,
 	trimmer video.Trimmer,
@@ -89,6 +111,9 @@ func RunTrimWithDependencies(
 	sourcePath string,
 	startTime string,
 	endTime string,
+	extractor video.AudioExtractor,
+	audioOutputDir string,
+	audioBitrate string,
 	output OutputWriter,
 ) error {
 	// Verify ffmpeg is available if trimmer supports it
@@ -118,5 +143,27 @@ func RunTrimWithDependencies(
 	}
 
 	fmt.Fprintf(output, "Successfully created: %s\n", result.OutputPath)
+
+	// Extract audio if extractor is provided
+	if extractor != nil {
+		serviceDate, _ := time.Parse("2006-01-02", result.ServiceDate)
+
+		fmt.Fprintf(output, "Extracting audio with bitrate %s...\n", audioBitrate)
+
+		extractService := appvideo.NewExtractService(extractor, fileChecker, audioOutputDir, audioBitrate)
+		extractInput := appvideo.ExtractInput{
+			SourcePath:  result.OutputPath,
+			ServiceDate: serviceDate,
+			Bitrate:     audioBitrate,
+		}
+
+		extractResult, err := extractService.Extract(ctx, extractInput)
+		if err != nil {
+			return fmt.Errorf("audio extraction failed: %w", err)
+		}
+
+		fmt.Fprintf(output, "Successfully created: %s\n", extractResult.OutputPath)
+	}
+
 	return nil
 }

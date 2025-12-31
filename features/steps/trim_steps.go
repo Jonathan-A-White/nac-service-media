@@ -16,9 +16,10 @@ import (
 
 // mockTrimmer records calls to Trim for verification
 type mockTrimmer struct {
-	calls      []trimCall
-	shouldFail bool
-	failError  error
+	calls       []trimCall
+	shouldFail  bool
+	failError   error
+	fileChecker *mockFileChecker // Reference to mark output files as existing
 }
 
 type trimCall struct {
@@ -42,6 +43,10 @@ func (m *mockTrimmer) Trim(ctx context.Context, req *video.TrimRequest, outputPa
 			"-y", outputPath,
 		},
 	})
+	// Mark the output file as existing so subsequent operations can find it
+	if m.fileChecker != nil {
+		m.fileChecker.existingFiles[outputPath] = true
+	}
 	return nil
 }
 
@@ -54,17 +59,52 @@ func (m *mockFileChecker) Exists(path string) bool {
 	return m.existingFiles[path]
 }
 
+// mockTrimExtractor records calls to Extract for verification in trim+audio tests
+type mockTrimExtractor struct {
+	calls      []trimExtractCall
+	shouldFail bool
+	failError  error
+}
+
+type trimExtractCall struct {
+	req        *video.AudioExtractionRequest
+	outputPath string
+	args       []string
+}
+
+func (m *mockTrimExtractor) Extract(ctx context.Context, req *video.AudioExtractionRequest, outputPath string) error {
+	if m.shouldFail {
+		return m.failError
+	}
+	m.calls = append(m.calls, trimExtractCall{
+		req:        req,
+		outputPath: outputPath,
+		args: []string{
+			"-i", req.SourceVideoPath,
+			"-vn",
+			"-acodec", "libmp3lame",
+			"-ab", req.Bitrate,
+			"-y", outputPath,
+		},
+	})
+	return nil
+}
+
 // trimContext holds test state for trim scenarios
 type trimContext struct {
-	sourcePath  string
-	outputDir   string
-	startTime   string
-	endTime     string
-	trimmer     *mockTrimmer
-	fileChecker *mockFileChecker
-	output      *bytes.Buffer
-	err         error
-	resultPath  string
+	sourcePath      string
+	outputDir       string
+	startTime       string
+	endTime         string
+	trimmer         *mockTrimmer
+	fileChecker     *mockFileChecker
+	extractor       *mockTrimExtractor
+	audioOutputDir  string
+	audioBitrate    string
+	output          *bytes.Buffer
+	err             error
+	resultPath      string
+	audioResultPath string
 }
 
 // SharedTrimContext is reset before each scenario via Before hook
@@ -76,12 +116,14 @@ func getTrimContext() *trimContext {
 
 func InitializeTrimScenario(ctx *godog.ScenarioContext) {
 	ctx.Before(func(c context.Context, sc *godog.Scenario) (context.Context, error) {
+		fileChecker := &mockFileChecker{
+			existingFiles: make(map[string]bool),
+		}
 		SharedTrimContext = &trimContext{
-			trimmer: &mockTrimmer{},
-			fileChecker: &mockFileChecker{
-				existingFiles: make(map[string]bool),
-			},
-			output: &bytes.Buffer{},
+			trimmer:     &mockTrimmer{fileChecker: fileChecker},
+			fileChecker: fileChecker,
+			extractor:   &mockTrimExtractor{},
+			output:      &bytes.Buffer{},
 		}
 		return c, nil
 	})
@@ -103,6 +145,13 @@ func InitializeTrimScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^I should receive an error about end time before start time$`, iShouldReceiveAnErrorAboutEndTimeBeforeStartTime)
 	ctx.Step(`^I should receive an error about missing source file$`, iShouldReceiveAnErrorAboutMissingSourceFile)
 	ctx.Step(`^I should receive an error about invalid source filename$`, iShouldReceiveAnErrorAboutInvalidSourceFilename)
+
+	// Steps for trim with audio extraction
+	ctx.Step(`^the trim audio output directory is "([^"]*)"$`, theTrimAudioOutputDirectoryIs)
+	ctx.Step(`^the trim audio bitrate is "([^"]*)"$`, theAudioBitrateIs)
+	ctx.Step(`^I trim the video from "([^"]*)" to "([^"]*)" with audio extraction$`, iTrimTheVideoFromToWithAudioExtraction)
+	ctx.Step(`^the trim audio output file should be "([^"]*)"$`, theTrimAudioOutputFileShouldBe)
+	ctx.Step(`^the trim audio extraction should have used arguments:$`, ffmpegShouldHaveBeenCalledWithAudioArgumentsTrim)
 }
 
 func theTrimmedOutputDirectoryIs(dir string) error {
@@ -138,6 +187,9 @@ func iTrimTheVideoFromTo(start, end string) error {
 		t.sourcePath,
 		t.startTime,
 		t.endTime,
+		nil, // no audio extractor
+		"",  // no audio output dir
+		"",  // no audio bitrate
 		t.output,
 	)
 
@@ -165,6 +217,9 @@ func iAttemptToTrimWithStartTime(start string) error {
 		t.sourcePath,
 		t.startTime,
 		t.endTime,
+		nil, // no audio extractor
+		"",  // no audio output dir
+		"",  // no audio bitrate
 		t.output,
 	)
 	return nil
@@ -183,6 +238,9 @@ func iAttemptToTrimFromTo(start, end string) error {
 		t.sourcePath,
 		t.startTime,
 		t.endTime,
+		nil, // no audio extractor
+		"",  // no audio output dir
+		"",  // no audio bitrate
 		t.output,
 	)
 	return nil
@@ -263,6 +321,90 @@ func iShouldReceiveAnErrorAboutInvalidSourceFilename() error {
 	}
 	if !strings.Contains(t.err.Error(), "does not match expected format") {
 		return fmt.Errorf("expected error about invalid source filename, got: %v", t.err)
+	}
+	return nil
+}
+
+// Steps for trim with audio extraction
+
+func theTrimAudioOutputDirectoryIs(dir string) error {
+	t := getTrimContext()
+	t.audioOutputDir = dir
+	return nil
+}
+
+func theAudioBitrateIs(bitrate string) error {
+	t := getTrimContext()
+	t.audioBitrate = bitrate
+	return nil
+}
+
+func iTrimTheVideoFromToWithAudioExtraction(start, end string) error {
+	t := getTrimContext()
+	t.startTime = start
+	t.endTime = end
+
+	t.err = cmd.RunTrimWithDependencies(
+		context.Background(),
+		t.trimmer,
+		t.fileChecker,
+		t.outputDir,
+		t.sourcePath,
+		t.startTime,
+		t.endTime,
+		t.extractor,
+		t.audioOutputDir,
+		t.audioBitrate,
+		t.output,
+	)
+
+	if t.err != nil {
+		return fmt.Errorf("unexpected error: %v", t.err)
+	}
+
+	// Capture result paths from mock calls
+	if len(t.trimmer.calls) > 0 {
+		t.resultPath = t.trimmer.calls[0].outputPath
+		// Mark the trimmed file as existing for the extractor
+		t.fileChecker.existingFiles[t.resultPath] = true
+	}
+	if len(t.extractor.calls) > 0 {
+		t.audioResultPath = t.extractor.calls[0].outputPath
+	}
+	return nil
+}
+
+func theTrimAudioOutputFileShouldBe(expected string) error {
+	t := getTrimContext()
+	if t.audioResultPath != expected {
+		return fmt.Errorf("expected audio output path %q, got %q", expected, t.audioResultPath)
+	}
+	return nil
+}
+
+func ffmpegShouldHaveBeenCalledWithAudioArgumentsTrim(table *godog.Table) error {
+	t := getTrimContext()
+	if len(t.extractor.calls) == 0 {
+		return fmt.Errorf("ffmpeg audio extraction was not called")
+	}
+
+	call := t.extractor.calls[0]
+
+	for i, row := range table.Rows {
+		if i == 0 {
+			continue // Skip header row
+		}
+		expectedArg := row.Cells[0].Value
+		found := false
+		for _, arg := range call.args {
+			if arg == expectedArg {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("expected argument %q not found in ffmpeg audio call: %v", expectedArg, call.args)
+		}
 	}
 	return nil
 }

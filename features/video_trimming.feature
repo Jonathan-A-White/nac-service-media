@@ -49,3 +49,18 @@ Feature: Video Trimming
     Given a source video at "/test/videos/recording.mp4"
     When I attempt to trim from "00:05:30" to "01:45:00"
     Then I should receive an error about invalid source filename
+
+  Scenario: Trim video with audio extraction
+    Given a source video at "/test/videos/2025-12-28 10-06-16.mp4"
+    And the trim audio output directory is "/tmp/test-audio"
+    And the trim audio bitrate is "192k"
+    When I trim the video from "00:05:30" to "01:45:00" with audio extraction
+    Then the output file should be "/tmp/test-trimmed/2025-12-28.mp4"
+    And the trim audio output file should be "/tmp/test-audio/2025-12-28.mp3"
+    And the trim audio extraction should have used arguments:
+      | argument     |
+      | -vn          |
+      | -acodec      |
+      | libmp3lame   |
+      | -ab          |
+      | 192k         |
