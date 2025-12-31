@@ -18,6 +18,9 @@ import (
 // This allows mocking the Google Drive API in tests
 type DriveService interface {
 	ListFiles(ctx context.Context, query string, fields string, orderBy string) ([]*drive.File, error)
+	GetAbout(ctx context.Context, fields string) (*drive.About, error)
+	DeleteFile(ctx context.Context, fileID string) error
+	EmptyTrash(ctx context.Context) error
 }
 
 // GoogleDriveService is the production implementation using the Google Drive API
@@ -37,6 +40,21 @@ func (s *GoogleDriveService) ListFiles(ctx context.Context, query string, fields
 		return nil, err
 	}
 	return r.Files, nil
+}
+
+// GetAbout gets information about the user's Drive
+func (s *GoogleDriveService) GetAbout(ctx context.Context, fields string) (*drive.About, error) {
+	return s.service.About.Get().Fields(googleapi.Field(fields)).Context(ctx).Do()
+}
+
+// DeleteFile deletes a file permanently (bypasses trash)
+func (s *GoogleDriveService) DeleteFile(ctx context.Context, fileID string) error {
+	return s.service.Files.Delete(fileID).Context(ctx).Do()
+}
+
+// EmptyTrash empties the trash
+func (s *GoogleDriveService) EmptyTrash(ctx context.Context) error {
+	return s.service.Files.EmptyTrash().Context(ctx).Do()
 }
 
 // Client implements distribution.DriveClient using Google Drive API
@@ -125,6 +143,66 @@ func parseTime(s string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// GetStorageQuota implements distribution.DriveClient
+func (c *Client) GetStorageQuota(ctx context.Context) (*distribution.StorageInfo, error) {
+	about, err := c.driveService.GetAbout(ctx, "storageQuota")
+	if err != nil {
+		return nil, fmt.Errorf("unable to get storage info: %w", err)
+	}
+
+	total := about.StorageQuota.Limit
+	used := about.StorageQuota.Usage
+
+	return &distribution.StorageInfo{
+		TotalBytes:     total,
+		UsedBytes:      used,
+		AvailableBytes: total - used,
+	}, nil
+}
+
+// ListMP4Files implements distribution.DriveClient
+// Returns MP4 files sorted by filename (oldest first)
+// Handles both "YYYY-MM-DD.mp4" and "YYYY-MM-DD HH-MM-SS.mp4" formats
+func (c *Client) ListMP4Files(ctx context.Context, folderID string) ([]distribution.FileInfo, error) {
+	query := fmt.Sprintf("'%s' in parents and mimeType='video/mp4' and trashed=false", folderID)
+	files, err := c.driveService.ListFiles(ctx, query, "id, name, mimeType, size, createdTime", "name")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list mp4 files: %w", err)
+	}
+
+	var result []distribution.FileInfo
+	for _, f := range files {
+		createdTime := parseTime(f.CreatedTime)
+		result = append(result, distribution.FileInfo{
+			ID:          f.Id,
+			Name:        f.Name,
+			MimeType:    f.MimeType,
+			Size:        f.Size,
+			CreatedTime: createdTime,
+		})
+	}
+
+	// Files are already sorted by name from Google Drive API
+	// Both formats (YYYY-MM-DD.mp4 and YYYY-MM-DD HH-MM-SS.mp4) sort correctly alphabetically
+	return result, nil
+}
+
+// DeletePermanently implements distribution.DriveClient
+func (c *Client) DeletePermanently(ctx context.Context, fileID string) error {
+	if err := c.driveService.DeleteFile(ctx, fileID); err != nil {
+		return fmt.Errorf("unable to delete file: %w", err)
+	}
+	return nil
+}
+
+// EmptyTrash implements distribution.DriveClient
+func (c *Client) EmptyTrash(ctx context.Context) error {
+	if err := c.driveService.EmptyTrash(ctx); err != nil {
+		return fmt.Errorf("unable to empty trash: %w", err)
+	}
+	return nil
 }
 
 // Ensure Client implements distribution.DriveClient

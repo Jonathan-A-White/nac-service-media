@@ -30,6 +30,7 @@ type AudioConfig struct {
 // GoogleConfig contains Google API settings
 type GoogleConfig struct {
 	CredentialsFile  string `yaml:"credentials_file"`
+	TokenFile        string `yaml:"token_file"`
 	ServicesFolderID string `yaml:"services_folder_id"`
 }
 

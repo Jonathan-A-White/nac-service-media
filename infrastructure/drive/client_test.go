@@ -11,9 +11,13 @@ import (
 
 // mockDriveService is a mock implementation for testing
 type mockDriveService struct {
-	files      []*drive.File
-	shouldFail bool
-	failError  error
+	files          []*drive.File
+	shouldFail     bool
+	failError      error
+	storageLimit   int64
+	storageUsage   int64
+	deletedFileIDs []string
+	trashEmptied   bool
 }
 
 func (m *mockDriveService) ListFiles(ctx context.Context, query string, fields string, orderBy string) ([]*drive.File, error) {
@@ -21,6 +25,34 @@ func (m *mockDriveService) ListFiles(ctx context.Context, query string, fields s
 		return nil, m.failError
 	}
 	return m.files, nil
+}
+
+func (m *mockDriveService) GetAbout(ctx context.Context, fields string) (*drive.About, error) {
+	if m.shouldFail {
+		return nil, m.failError
+	}
+	return &drive.About{
+		StorageQuota: &drive.AboutStorageQuota{
+			Limit: m.storageLimit,
+			Usage: m.storageUsage,
+		},
+	}, nil
+}
+
+func (m *mockDriveService) DeleteFile(ctx context.Context, fileID string) error {
+	if m.shouldFail {
+		return m.failError
+	}
+	m.deletedFileIDs = append(m.deletedFileIDs, fileID)
+	return nil
+}
+
+func (m *mockDriveService) EmptyTrash(ctx context.Context) error {
+	if m.shouldFail {
+		return m.failError
+	}
+	m.trashEmptied = true
+	return nil
 }
 
 func TestClient_ListFiles(t *testing.T) {
@@ -211,4 +243,234 @@ func containsSubstr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestClient_GetStorageQuota(t *testing.T) {
+	tests := []struct {
+		name          string
+		mock          *mockDriveService
+		wantTotal     int64
+		wantUsed      int64
+		wantAvailable int64
+		wantErr       bool
+	}{
+		{
+			name: "returns storage quota successfully",
+			mock: &mockDriveService{
+				storageLimit: 15000000000, // 15 GB
+				storageUsage: 5000000000,  // 5 GB
+			},
+			wantTotal:     15000000000,
+			wantUsed:      5000000000,
+			wantAvailable: 10000000000,
+			wantErr:       false,
+		},
+		{
+			name: "handles API error",
+			mock: &mockDriveService{
+				shouldFail: true,
+				failError:  fmt.Errorf("API error"),
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, _ := NewClient(context.Background(), "", WithDriveService(tt.mock))
+			storage, err := client.GetStorageQuota(context.Background())
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if storage.TotalBytes != tt.wantTotal {
+				t.Errorf("expected TotalBytes %d, got %d", tt.wantTotal, storage.TotalBytes)
+			}
+			if storage.UsedBytes != tt.wantUsed {
+				t.Errorf("expected UsedBytes %d, got %d", tt.wantUsed, storage.UsedBytes)
+			}
+			if storage.AvailableBytes != tt.wantAvailable {
+				t.Errorf("expected AvailableBytes %d, got %d", tt.wantAvailable, storage.AvailableBytes)
+			}
+		})
+	}
+}
+
+func TestClient_ListMP4Files(t *testing.T) {
+	testTime := time.Date(2025, 12, 28, 10, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		mock      *mockDriveService
+		wantCount int
+		wantFirst string
+		wantErr   bool
+	}{
+		{
+			name: "lists mp4 files sorted by name",
+			mock: &mockDriveService{
+				files: []*drive.File{
+					{Id: "file-1", Name: "2025-11-03.mp4", MimeType: "video/mp4", Size: 1000000, CreatedTime: testTime.Format(time.RFC3339)},
+					{Id: "file-2", Name: "2025-11-10 08-00-00.mp4", MimeType: "video/mp4", Size: 2000000, CreatedTime: testTime.Format(time.RFC3339)},
+					{Id: "file-3", Name: "2025-11-17.mp4", MimeType: "video/mp4", Size: 3000000, CreatedTime: testTime.Format(time.RFC3339)},
+				},
+			},
+			wantCount: 3,
+			wantFirst: "2025-11-03.mp4",
+			wantErr:   false,
+		},
+		{
+			name: "returns empty list for folder with no mp4s",
+			mock: &mockDriveService{
+				files: []*drive.File{},
+			},
+			wantCount: 0,
+			wantErr:   false,
+		},
+		{
+			name: "handles API error",
+			mock: &mockDriveService{
+				shouldFail: true,
+				failError:  fmt.Errorf("API error"),
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, _ := NewClient(context.Background(), "", WithDriveService(tt.mock))
+			files, err := client.ListMP4Files(context.Background(), "test-folder")
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if len(files) != tt.wantCount {
+				t.Errorf("expected %d files, got %d", tt.wantCount, len(files))
+			}
+
+			if tt.wantFirst != "" && len(files) > 0 && files[0].Name != tt.wantFirst {
+				t.Errorf("expected first file %q, got %q", tt.wantFirst, files[0].Name)
+			}
+		})
+	}
+}
+
+func TestClient_DeletePermanently(t *testing.T) {
+	tests := []struct {
+		name    string
+		mock    *mockDriveService
+		fileID  string
+		wantErr bool
+	}{
+		{
+			name:    "deletes file successfully",
+			mock:    &mockDriveService{},
+			fileID:  "file-123",
+			wantErr: false,
+		},
+		{
+			name: "handles API error",
+			mock: &mockDriveService{
+				shouldFail: true,
+				failError:  fmt.Errorf("API error"),
+			},
+			fileID:  "file-123",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, _ := NewClient(context.Background(), "", WithDriveService(tt.mock))
+			err := client.DeletePermanently(context.Background(), tt.fileID)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			// Verify the file was marked as deleted in the mock
+			found := false
+			for _, id := range tt.mock.deletedFileIDs {
+				if id == tt.fileID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected file %q to be deleted", tt.fileID)
+			}
+		})
+	}
+}
+
+func TestClient_EmptyTrash(t *testing.T) {
+	tests := []struct {
+		name    string
+		mock    *mockDriveService
+		wantErr bool
+	}{
+		{
+			name:    "empties trash successfully",
+			mock:    &mockDriveService{},
+			wantErr: false,
+		},
+		{
+			name: "handles API error",
+			mock: &mockDriveService{
+				shouldFail: true,
+				failError:  fmt.Errorf("API error"),
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, _ := NewClient(context.Background(), "", WithDriveService(tt.mock))
+			err := client.EmptyTrash(context.Background())
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if !tt.mock.trashEmptied {
+				t.Error("expected trash to be emptied")
+			}
+		})
+	}
 }

@@ -22,6 +22,10 @@ type mockDriveService struct {
 	shouldFail      bool
 	failError       error
 	permissionError bool
+	storageLimit    int64
+	storageUsage    int64
+	deletedFileIDs  []string
+	trashEmptied    bool
 }
 
 func (m *mockDriveService) ListFiles(ctx context.Context, query string, fields string, orderBy string) ([]*googledrive.File, error) {
@@ -32,6 +36,34 @@ func (m *mockDriveService) ListFiles(ctx context.Context, query string, fields s
 		return nil, fmt.Errorf("googleapi: Error 403: The user does not have permission")
 	}
 	return m.files, nil
+}
+
+func (m *mockDriveService) GetAbout(ctx context.Context, fields string) (*googledrive.About, error) {
+	if m.shouldFail {
+		return nil, m.failError
+	}
+	return &googledrive.About{
+		StorageQuota: &googledrive.AboutStorageQuota{
+			Limit: m.storageLimit,
+			Usage: m.storageUsage,
+		},
+	}, nil
+}
+
+func (m *mockDriveService) DeleteFile(ctx context.Context, fileID string) error {
+	if m.shouldFail {
+		return m.failError
+	}
+	m.deletedFileIDs = append(m.deletedFileIDs, fileID)
+	return nil
+}
+
+func (m *mockDriveService) EmptyTrash(ctx context.Context) error {
+	if m.shouldFail {
+		return m.failError
+	}
+	m.trashEmptied = true
+	return nil
 }
 
 // driveContext holds test state for drive scenarios
