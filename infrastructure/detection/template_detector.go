@@ -106,11 +106,32 @@ func (d *TemplateDetector) DetectStart(ctx context.Context, videoPath string) (d
 
 	var framesAnalyzed int
 
+	// Check if cross is already lit at the very beginning (recording started late)
+	earlyCheck, err := d.analyzeFrame(ctx, videoPath, 5) // Check at 5 seconds
+	framesAnalyzed++
+	if err == nil && earlyCheck.State == detection.StateLit {
+		// Cross is already lit - return 00:00:00 as start
+		return detection.DetectionResult{
+			Timestamp:      video.Timestamp{Hours: 0, Minutes: 0, Seconds: 0},
+			Confidence:     earlyCheck.Confidence,
+			CameraAngle:    earlyCheck.CameraAngle,
+			FramesAnalyzed: framesAnalyzed,
+		}, nil
+	}
+
 	// Phase 1: Coarse scan to find bounds
 	var firstUnlitTime, firstLitTime int
 	foundUnlit, foundLit := false, false
 
-	for t := startSeconds; t <= endSeconds; t += coarseStep {
+	// Start from 0 if the early check showed unlit or not visible
+	scanStart := 0
+	if earlyCheck.State == detection.StateUnlit {
+		firstUnlitTime = 5
+		foundUnlit = true
+		scanStart = coarseStep // Skip ahead since we already checked the beginning
+	}
+
+	for t := scanStart; t <= endSeconds; t += coarseStep {
 		select {
 		case <-ctx.Done():
 			return detection.DetectionResult{}, ctx.Err()
