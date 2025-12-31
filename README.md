@@ -23,8 +23,12 @@ sudo apt-get install -y golang-go
 # Install ffmpeg for video processing
 sudo apt-get install -y ffmpeg
 
-# Install OpenCV for auto-detection (optional but recommended)
+# Install OpenCV for start auto-detection (optional but recommended)
 sudo apt-get install -y libopencv-dev libopencv-contrib-dev build-essential
+
+# Install Python for end auto-detection (optional but recommended)
+sudo apt-get install -y python3 python3-pip
+pip3 install librosa numpy scipy
 ```
 
 ### 2. Clone and Build
@@ -61,10 +65,13 @@ You'll also need to copy your Google OAuth credentials:
 ## Quick Start
 
 ```bash
-# Process with auto-detected start timestamp
+# Process with fully auto-detected timestamps (start + end)
+./nac-service-media process --minister henkel --recipient jane
+
+# Process with auto-detected start, manual end
 ./nac-service-media process --end 01:45:00 --minister henkel --recipient jane
 
-# Process with manual timestamps
+# Process with fully manual timestamps
 ./nac-service-media process --start 00:05:30 --end 01:45:00 --minister henkel --recipient jane
 ```
 
@@ -83,7 +90,7 @@ Runs the complete automation: detect/trim → extract audio → upload → email
 # Options:
 #   --input      Source video (defaults to newest in source_directory)
 #   --start      Start timestamp HH:MM:SS (auto-detected if omitted)
-#   --end        End timestamp HH:MM:SS (required)
+#   --end        End timestamp HH:MM:SS (auto-detected if omitted)
 #   --minister   Minister config key (required)
 #   --recipient  Recipient config key (required, repeatable)
 #   --cc         Additional CC config key (optional, repeatable)
@@ -189,6 +196,8 @@ detection:
 
 ## Auto-Detection
 
+### Start Detection (Visual)
+
 When `--start` is omitted, the tool automatically detects when the cross lights up using template matching. This requires:
 
 1. OpenCV installed (`libopencv-dev libopencv-contrib-dev`)
@@ -202,6 +211,23 @@ The detection uses a 3-phase algorithm:
 3. **Refinement**: Find exact frame
 
 Typical accuracy: within 1 second of actual timestamp.
+
+### End Detection (Audio)
+
+When `--end` is omitted, the tool automatically detects the end of the three-fold amen song using audio template matching. This requires:
+
+1. Python 3.8+ with librosa, numpy, scipy (`pip3 install librosa numpy scipy`)
+2. Build with `-tags=detection`
+3. `detection.enabled: true` in config
+4. Audio template in `config/audio_templates/`
+
+The detection uses chromagram cross-correlation:
+1. Extract audio from video (FFmpeg)
+2. Compute chromagram (pitch-based representation)
+3. Cross-correlate with amen template
+4. Find best match above confidence threshold
+
+Typical accuracy: within 2 seconds of actual timestamp.
 
 ## Development
 
@@ -229,9 +255,11 @@ nac-service-media/
 │   ├── gmail/            # Gmail client
 │   └── detection/        # GoCV template matching
 ├── features/              # BDD tests (godog)
+├── scripts/               # Helper scripts (Python detection)
 └── config/
     ├── config.yaml        # Your config (gitignored)
-    └── detection_templates/  # Cross templates for auto-detection
+    ├── detection_templates/  # Cross templates for start detection
+    └── audio_templates/      # Amen template for end detection
 ```
 
 ## License
