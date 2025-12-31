@@ -9,6 +9,9 @@
 
 set -euo pipefail
 
+# Add Go bin to PATH for yq
+export PATH="$PATH:$HOME/go/bin"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="$PROJECT_DIR/config/config.yaml"
