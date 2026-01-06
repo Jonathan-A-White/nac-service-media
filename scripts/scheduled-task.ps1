@@ -37,11 +37,16 @@ Write-Log "=========================================="
 Write-Log "Date: $DateStamp"
 Write-Log "Recipient: $Recipient"
 Write-Log "Log file: $LogFile"
+
+# Convert Windows project path to WSL path
+$WslProjectDir = (wsl.exe wslpath -u ($ProjectDir -replace '\\', '/')).Trim()
+Write-Log "Project dir: $WslProjectDir"
 Write-Log ""
 
 # Build the WSL command
-# Uses -l (login shell) to ensure PATH is loaded from .bashrc/.profile
-$WslCommand = "nac-service-media process --recipient $Recipient"
+# Uses -l (login shell) to ensure PATH is loaded from .profile
+# Changes to project directory first so config/config.yaml is found
+$WslCommand = "cd $WslProjectDir && nac-service-media process --recipient $Recipient"
 
 if ($DryRun) {
     Write-Log "[DRY RUN] Would execute: wsl.exe -d Ubuntu -- bash -lc `"$WslCommand`""
