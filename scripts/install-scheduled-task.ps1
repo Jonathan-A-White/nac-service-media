@@ -62,14 +62,14 @@ if (-not $SkipBinaryInstall) {
     Write-Host "Binary installed to ~/go/bin/nac-service-media"
     $StepNum++
 
-    # Step 2: Ensure PATH is set in .bashrc
+    # Step 2: Ensure PATH is set in .profile (not .bashrc, which has non-interactive guard)
     Write-Host ""
     Write-Host "Step $StepNum`: Ensuring PATH includes ~/go/bin..."
     $PathCheckCmd = @'
-if ! grep -q 'export PATH=.*\$HOME/go/bin' ~/.bashrc 2>/dev/null; then
-    echo '' >> ~/.bashrc
-    echo '# Go binaries' >> ~/.bashrc
-    echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.bashrc
+if ! grep -q 'export PATH=.*\$HOME/go/bin' ~/.profile 2>/dev/null; then
+    echo '' >> ~/.profile
+    echo '# Go binaries' >> ~/.profile
+    echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.profile
     echo "ADDED"
 else
     echo "EXISTS"
@@ -77,7 +77,7 @@ fi
 '@
     $PathResult = wsl.exe -d Ubuntu -- bash -c $PathCheckCmd
     if ($PathResult -eq "ADDED") {
-        Write-Host "Added ~/go/bin to PATH in .bashrc"
+        Write-Host "Added ~/go/bin to PATH in .profile"
     } else {
         Write-Host "PATH already includes ~/go/bin"
     }

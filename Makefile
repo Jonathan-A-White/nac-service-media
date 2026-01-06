@@ -32,12 +32,12 @@ install-python-deps:
 # Install Windows Scheduled Task (WSL only - calls PowerShell)
 install-scheduled-task: install-detection
 	@echo "Installing Windows Scheduled Task..."
-	@# Ensure PATH includes ~/go/bin in .bashrc
-	@if ! grep -q 'export PATH=.*\$$HOME/go/bin' ~/.bashrc 2>/dev/null; then \
-		echo '' >> ~/.bashrc; \
-		echo '# Go binaries' >> ~/.bashrc; \
-		echo 'export PATH="$$HOME/go/bin:$$PATH"' >> ~/.bashrc; \
-		echo "Added ~/go/bin to PATH in .bashrc"; \
+	@# Ensure PATH includes ~/go/bin in .profile (not .bashrc, which has non-interactive guard)
+	@if ! grep -q 'export PATH=.*\$$HOME/go/bin' ~/.profile 2>/dev/null; then \
+		echo '' >> ~/.profile; \
+		echo '# Go binaries' >> ~/.profile; \
+		echo 'export PATH="$$HOME/go/bin:$$PATH"' >> ~/.profile; \
+		echo "Added ~/go/bin to PATH in .profile"; \
 	else \
 		echo "PATH already includes ~/go/bin"; \
 	fi
