@@ -56,15 +56,13 @@ if ($DryRun) {
 Write-Log "Executing: wsl.exe -d Ubuntu -- bash -lc `"$WslCommand`""
 Write-Log ""
 
-# Run the command and capture output
+# Run the command and stream output in real-time
 try {
-    $Output = wsl.exe -d Ubuntu -- bash -lc $WslCommand 2>&1
-    $ExitCode = $LASTEXITCODE
-
-    # Log all output
-    foreach ($Line in $Output) {
-        Write-Log $Line
+    # Use pipeline to stream each line as it arrives
+    wsl.exe -d Ubuntu -- bash -lc $WslCommand 2>&1 | ForEach-Object {
+        Write-Log $_
     }
+    $ExitCode = $LASTEXITCODE
 
     Write-Log ""
     Write-Log "Exit code: $ExitCode"
