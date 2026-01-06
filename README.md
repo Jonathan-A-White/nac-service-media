@@ -229,6 +229,42 @@ The detection uses chromagram cross-correlation:
 
 Typical accuracy: within 2 seconds of actual timestamp.
 
+## Scheduled Automation (Windows)
+
+The tool can be set up to run automatically every Sunday via Windows Task Scheduler. This works even when WSL is not actively open.
+
+### Installation
+
+From WSL:
+
+```bash
+make install-scheduled-task
+```
+
+This will:
+1. Install the binary to `~/go/bin/nac-service-media` (with detection enabled)
+2. Add `~/go/bin` to PATH in `.bashrc` (if not already present)
+3. Create a Windows Scheduled Task named `NAC-Service-Media-Weekly`
+4. Configure it to run every Sunday at 12:30 PM
+
+### Manual Testing
+
+```bash
+# Run the scheduled task immediately (from PowerShell)
+schtasks /run /tn "NAC-Service-Media-Weekly"
+
+# View logs (from WSL)
+tail -50 logs/scheduled-run-*.log
+```
+
+### Uninstallation
+
+```bash
+make uninstall-scheduled-task
+```
+
+Logs are written to `logs/scheduled-run-YYYY-MM-DD_HH-mm-ss.log`.
+
 ## Development
 
 ### Running Tests

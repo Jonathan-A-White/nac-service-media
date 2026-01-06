@@ -1,4 +1,4 @@
-.PHONY: build build-detection test test-unit test-integration check clean install install-deps install-python-deps help
+.PHONY: build build-detection test test-unit test-integration check clean install install-deps install-python-deps install-scheduled-task uninstall-scheduled-task help
 
 # Default target
 all: check
@@ -28,6 +28,24 @@ install-deps:
 # Install Python dependencies for end detection
 install-python-deps:
 	pip3 install librosa numpy scipy
+
+# Install Windows Scheduled Task (WSL only - calls PowerShell)
+install-scheduled-task: install-detection
+	@echo "Installing Windows Scheduled Task..."
+	@# Ensure PATH includes ~/go/bin in .bashrc
+	@if ! grep -q 'export PATH=.*\$$HOME/go/bin' ~/.bashrc 2>/dev/null; then \
+		echo '' >> ~/.bashrc; \
+		echo '# Go binaries' >> ~/.bashrc; \
+		echo 'export PATH="$$HOME/go/bin:$$PATH"' >> ~/.bashrc; \
+		echo "Added ~/go/bin to PATH in .bashrc"; \
+	else \
+		echo "PATH already includes ~/go/bin"; \
+	fi
+	powershell.exe -ExecutionPolicy Bypass -File "$(CURDIR)/scripts/install-scheduled-task.ps1" -SkipBinaryInstall
+
+# Uninstall Windows Scheduled Task (WSL only - calls PowerShell)
+uninstall-scheduled-task:
+	powershell.exe -ExecutionPolicy Bypass -File "$(CURDIR)/scripts/install-scheduled-task.ps1" -Uninstall
 
 # Run all checks (build + tests)
 check: build test
@@ -64,19 +82,21 @@ lint:
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  all                 - Run check (default)"
-	@echo "  build               - Build the binary (no detection)"
-	@echo "  build-detection     - Build with auto-detection (requires OpenCV + Python)"
-	@echo "  install             - Install to GOPATH/bin"
-	@echo "  install-detection   - Install with detection to GOPATH/bin"
-	@echo "  install-deps        - Install system dependencies (Ubuntu/Debian)"
-	@echo "  install-python-deps - Install Python packages for end detection"
-	@echo "  check               - Build and run all tests"
-	@echo "  test                - Run all tests (unit + integration)"
-	@echo "  test-unit           - Run unit tests only"
-	@echo "  test-integration    - Run BDD integration tests only"
-	@echo "  test-verbose        - Run all tests with verbose output"
-	@echo "  clean               - Remove build artifacts"
-	@echo "  fmt                 - Format code"
-	@echo "  lint                - Run linter"
-	@echo "  help                - Show this help"
+	@echo "  all                      - Run check (default)"
+	@echo "  build                    - Build the binary (no detection)"
+	@echo "  build-detection          - Build with auto-detection (requires OpenCV + Python)"
+	@echo "  install                  - Install to GOPATH/bin"
+	@echo "  install-detection        - Install with detection to GOPATH/bin"
+	@echo "  install-deps             - Install system dependencies (Ubuntu/Debian)"
+	@echo "  install-python-deps      - Install Python packages for end detection"
+	@echo "  install-scheduled-task   - Install Windows Scheduled Task (WSL only)"
+	@echo "  uninstall-scheduled-task - Remove Windows Scheduled Task (WSL only)"
+	@echo "  check                    - Build and run all tests"
+	@echo "  test                     - Run all tests (unit + integration)"
+	@echo "  test-unit                - Run unit tests only"
+	@echo "  test-integration         - Run BDD integration tests only"
+	@echo "  test-verbose             - Run all tests with verbose output"
+	@echo "  clean                    - Remove build artifacts"
+	@echo "  fmt                      - Format code"
+	@echo "  lint                     - Run linter"
+	@echo "  help                     - Show this help"

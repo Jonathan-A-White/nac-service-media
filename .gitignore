@@ -47,5 +47,8 @@ scripts/check_permissions/
 scripts/cleanup_test/
 scripts/cleanup_test_upload/
 
+# Scheduled task logs
+logs/
+
 # Thoughts symlink (managed separately)
 thoughts
