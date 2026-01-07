@@ -231,7 +231,7 @@ Typical accuracy: within 2 seconds of actual timestamp.
 
 ## Scheduled Automation (Windows)
 
-The tool can be set up to run automatically every Sunday via Windows Task Scheduler. This works even when WSL is not actively open.
+The tool can be set up to run automatically twice per week via Windows Task Scheduler. This works even when WSL is not actively open.
 
 ### Installation
 
@@ -243,15 +243,17 @@ make install-scheduled-task
 
 This will:
 1. Install the binary to `~/go/bin/nac-service-media` (with detection enabled)
-2. Add `~/go/bin` to PATH in `.bashrc` (if not already present)
-3. Create a Windows Scheduled Task named `NAC-Service-Media-Weekly`
-4. Configure it to run every Sunday at 12:30 PM
+2. Add `~/go/bin` to PATH in `.profile` (if not already present)
+3. Create two Windows Scheduled Tasks:
+   - `NAC-Service-Media-Weekly-Sunday` - Runs every Sunday at 12:30 PM
+   - `NAC-Service-Media-Weekly-Wednesday` - Runs every Wednesday at 9:30 PM
 
 ### Manual Testing
 
 ```bash
-# Run the scheduled task immediately (from PowerShell)
-schtasks /run /tn "NAC-Service-Media-Weekly"
+# Run a scheduled task immediately (from PowerShell)
+schtasks /run /tn "NAC-Service-Media-Weekly-Sunday"
+schtasks /run /tn "NAC-Service-Media-Weekly-Wednesday"
 
 # View logs (from WSL)
 tail -50 logs/scheduled-run-*.log
