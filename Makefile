@@ -29,9 +29,9 @@ install-deps:
 install-python-deps:
 	pip3 install librosa numpy scipy
 
-# Install Windows Scheduled Task (WSL only - calls PowerShell)
+# Install Windows Scheduled Tasks (WSL only - calls PowerShell)
 install-scheduled-task: install-detection
-	@echo "Installing Windows Scheduled Task..."
+	@echo "Installing Windows Scheduled Tasks..."
 	@# Ensure PATH includes ~/go/bin in .profile (not .bashrc, which has non-interactive guard)
 	@if ! grep -q 'export PATH=.*\$$HOME/go/bin' ~/.profile 2>/dev/null; then \
 		echo '' >> ~/.profile; \
@@ -41,11 +41,11 @@ install-scheduled-task: install-detection
 	else \
 		echo "PATH already includes ~/go/bin"; \
 	fi
-	powershell.exe -ExecutionPolicy Bypass -File "$(CURDIR)/scripts/install-scheduled-task.ps1" -SkipBinaryInstall
+	powershell.exe -ExecutionPolicy Bypass -File "$(CURDIR)/scripts/install-both-tasks.ps1" -SkipBinaryInstall
 
-# Uninstall Windows Scheduled Task (WSL only - calls PowerShell)
+# Uninstall Windows Scheduled Tasks (WSL only - calls PowerShell)
 uninstall-scheduled-task:
-	powershell.exe -ExecutionPolicy Bypass -File "$(CURDIR)/scripts/install-scheduled-task.ps1" -Uninstall
+	powershell.exe -ExecutionPolicy Bypass -File "$(CURDIR)/scripts/install-both-tasks.ps1" -Uninstall
 
 # Run all checks (build + tests)
 check: build test
@@ -89,8 +89,8 @@ help:
 	@echo "  install-detection        - Install with detection to GOPATH/bin"
 	@echo "  install-deps             - Install system dependencies (Ubuntu/Debian)"
 	@echo "  install-python-deps      - Install Python packages for end detection"
-	@echo "  install-scheduled-task   - Install Windows Scheduled Task (WSL only)"
-	@echo "  uninstall-scheduled-task - Remove Windows Scheduled Task (WSL only)"
+	@echo "  install-scheduled-task   - Install Windows Scheduled Tasks (Sunday & Wednesday) (WSL only)"
+	@echo "  uninstall-scheduled-task - Remove Windows Scheduled Tasks (WSL only)"
 	@echo "  check                    - Build and run all tests"
 	@echo "  test                     - Run all tests (unit + integration)"
 	@echo "  test-unit                - Run unit tests only"
