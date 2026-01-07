@@ -426,12 +426,12 @@ func (s *Service) ensureStorage(ctx context.Context, neededBytes int64) (*distri
 }
 
 func (s *Service) uploadVideo(ctx context.Context, videoPath string) (*distribution.UploadResult, error) {
-	uploadService := appdist.NewUploadService(s.driveClient, s.cfg.Google.ServicesFolderID)
+	uploadService := appdist.NewUploadService(s.driveClient, s.cfg.Google.ServicesFolderID, s.output)
 	return uploadService.UploadVideo(ctx, videoPath)
 }
 
 func (s *Service) uploadAudio(ctx context.Context, audioPath string) (*distribution.UploadResult, error) {
-	uploadService := appdist.NewUploadService(s.driveClient, s.cfg.Google.ServicesFolderID)
+	uploadService := appdist.NewUploadService(s.driveClient, s.cfg.Google.ServicesFolderID, s.output)
 	return uploadService.UploadAudio(ctx, audioPath)
 }
 

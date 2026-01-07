@@ -3,6 +3,7 @@
 package steps
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -46,6 +47,22 @@ func (m *uploadMockDriveService) ListFiles(ctx context.Context, query string, fi
 	}
 	if m.permissionError {
 		return nil, fmt.Errorf("googleapi: Error 403: The user does not have permission")
+	}
+	// Filter files by name if query contains "name = " (for FindFileByName support)
+	if strings.Contains(query, "name = ") {
+		// Extract the filename from the query
+		start := strings.Index(query, "name = '") + 8
+		end := strings.Index(query[start:], "'") + start
+		if start > 8 && end > start {
+			targetName := query[start:end]
+			var result []*googledrive.File
+			for _, f := range m.files {
+				if f.Name == targetName {
+					result = append(result, f)
+				}
+			}
+			return result, nil
+		}
 	}
 	return m.files, nil
 }
@@ -127,6 +144,7 @@ type uploadContext struct {
 	audioPath          string
 	uploadedFileID     string
 	service            *appdist.UploadService
+	outputBuffer       *bytes.Buffer
 }
 
 // SharedUploadContext is reset before each scenario via Before hook
@@ -180,6 +198,13 @@ func InitializeUploadScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the permission API will fail$`, thePermissionAPIWillFail)
 	ctx.Step(`^I attempt to set public sharing permission$`, iAttemptToSetPublicSharingPermission)
 	ctx.Step(`^I should receive an error about permission failure$`, iShouldReceiveAnErrorAboutPermissionFailure)
+
+	// Duplicate file handling steps
+	ctx.Step(`^the Drive folder already contains:$`, uploadTheDriveFolderAlreadyContains)
+	ctx.Step(`^the file "([^"]*)" should be deleted before upload$`, uploadTheFileShouldBeDeletedBeforeUpload)
+	ctx.Step(`^no files should be deleted before upload$`, uploadNoFilesShouldBeDeletedBeforeUpload)
+	ctx.Step(`^the upload output should contain "([^"]*)"$`, uploadTheOutputShouldContain)
+	ctx.Step(`^the upload output should not contain "([^"]*)"$`, uploadTheOutputShouldNotContain)
 }
 
 func uploadTheServicesFolderIDIs(folderID string) error {
@@ -201,7 +226,8 @@ func validGoogleDriveUploadCredentials() error {
 		return fmt.Errorf("failed to initialize client: %v", err)
 	}
 	u.client = client
-	u.service = appdist.NewUploadService(client, u.folderID)
+	u.outputBuffer = &bytes.Buffer{}
+	u.service = appdist.NewUploadService(client, u.folderID, u.outputBuffer)
 	return nil
 }
 
@@ -409,6 +435,75 @@ func iShouldReceiveAnErrorAboutPermissionFailure() error {
 	}
 	if !strings.Contains(u.err.Error(), "permission") && !strings.Contains(u.err.Error(), "sharing") {
 		return fmt.Errorf("expected error about permission, got: %v", u.err)
+	}
+	return nil
+}
+
+// Step definitions for duplicate file handling scenarios
+
+func uploadTheDriveFolderAlreadyContains(table *godog.Table) error {
+	u := getUploadContext()
+
+	// Parse the table (header row + data rows)
+	for i, row := range table.Rows {
+		if i == 0 {
+			// Skip header row
+			continue
+		}
+		// Columns: name, mimeType, size
+		name := row.Cells[0].Value
+		mimeType := row.Cells[1].Value
+		size := int64(0)
+		fmt.Sscanf(row.Cells[2].Value, "%d", &size)
+
+		u.mockService.files = append(u.mockService.files, &googledrive.File{
+			Id:       fmt.Sprintf("existing-file-%d", i),
+			Name:     name,
+			MimeType: mimeType,
+			Size:     size,
+		})
+	}
+	return nil
+}
+
+func uploadTheFileShouldBeDeletedBeforeUpload(filename string) error {
+	u := getUploadContext()
+	for _, id := range u.mockService.deletedFileIDs {
+		for _, f := range u.mockService.files {
+			if f.Id == id && f.Name == filename {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("expected %q to be deleted, but it wasn't (deleted IDs: %v)", filename, u.mockService.deletedFileIDs)
+}
+
+func uploadNoFilesShouldBeDeletedBeforeUpload() error {
+	u := getUploadContext()
+	if len(u.mockService.deletedFileIDs) > 0 {
+		return fmt.Errorf("expected no deletions, but %d files were deleted: %v", len(u.mockService.deletedFileIDs), u.mockService.deletedFileIDs)
+	}
+	return nil
+}
+
+func uploadTheOutputShouldContain(expected string) error {
+	u := getUploadContext()
+	if u.outputBuffer == nil {
+		return fmt.Errorf("output buffer is nil")
+	}
+	if !strings.Contains(u.outputBuffer.String(), expected) {
+		return fmt.Errorf("expected output to contain %q, got: %s", expected, u.outputBuffer.String())
+	}
+	return nil
+}
+
+func uploadTheOutputShouldNotContain(unexpected string) error {
+	u := getUploadContext()
+	if u.outputBuffer == nil {
+		return fmt.Errorf("output buffer is nil")
+	}
+	if strings.Contains(u.outputBuffer.String(), unexpected) {
+		return fmt.Errorf("expected output NOT to contain %q, but it did: %s", unexpected, u.outputBuffer.String())
 	}
 	return nil
 }

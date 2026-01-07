@@ -3,6 +3,7 @@ package distribution
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -13,13 +14,18 @@ import (
 type UploadService struct {
 	driveClient distribution.DriveClient
 	folderID    string
+	output      io.Writer
 }
 
 // NewUploadService creates a new upload service
-func NewUploadService(client distribution.DriveClient, folderID string) *UploadService {
+func NewUploadService(client distribution.DriveClient, folderID string, output io.Writer) *UploadService {
+	if output == nil {
+		output = io.Discard
+	}
 	return &UploadService{
 		driveClient: client,
 		folderID:    folderID,
+		output:      output,
 	}
 }
 
@@ -50,16 +56,30 @@ func (s *UploadService) uploadAndShare(ctx context.Context, filePath, mimeType s
 		return nil, fmt.Errorf("file does not exist: %s", filePath)
 	}
 
+	fileName := filepath.Base(filePath)
+
+	// Check for existing file with same name and delete if found
+	existing, err := s.driveClient.FindFileByName(ctx, s.folderID, fileName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing file: %w", err)
+	}
+	if existing != nil {
+		fmt.Fprintf(s.output, "      Replacing existing %s (%.1f MB)\n", existing.Name, float64(existing.Size)/1024/1024)
+		if err := s.driveClient.DeletePermanently(ctx, existing.ID); err != nil {
+			return nil, fmt.Errorf("failed to delete existing file %s: %w", existing.Name, err)
+		}
+	}
+
 	req := distribution.UploadRequest{
 		LocalPath: filePath,
-		FileName:  filepath.Base(filePath),
+		FileName:  fileName,
 		FolderID:  s.folderID,
 		MimeType:  mimeType,
 	}
 
 	result, err := s.driveClient.UploadAndShare(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to upload and share %s: %w", filepath.Base(filePath), err)
+		return nil, fmt.Errorf("failed to upload and share %s: %w", fileName, err)
 	}
 
 	return result, nil

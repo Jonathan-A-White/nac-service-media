@@ -11,6 +11,10 @@ type DriveClient interface {
 	// ListFiles lists files in a folder
 	ListFiles(ctx context.Context, folderID string) ([]FileInfo, error)
 
+	// FindFileByName finds a file by exact name match in a folder
+	// Returns nil, nil if no file is found (not an error)
+	FindFileByName(ctx context.Context, folderID, fileName string) (*FileInfo, error)
+
 	// GetStorageQuota returns the current storage quota information
 	GetStorageQuota(ctx context.Context) (*StorageInfo, error)
 

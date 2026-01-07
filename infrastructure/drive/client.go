@@ -170,6 +170,31 @@ func (c *Client) ListFiles(ctx context.Context, folderID string) ([]distribution
 	return result, nil
 }
 
+// FindFileByName implements distribution.DriveClient
+// Returns nil, nil if no file with the given name exists
+func (c *Client) FindFileByName(ctx context.Context, folderID, fileName string) (*distribution.FileInfo, error) {
+	// Use Drive API query to filter by exact name
+	query := fmt.Sprintf("'%s' in parents and name = '%s' and trashed = false", folderID, fileName)
+	files, err := c.driveService.ListFiles(ctx, query, "id, name, mimeType, size, createdTime", "name")
+	if err != nil {
+		return nil, fmt.Errorf("failed to find file by name: %w", err)
+	}
+
+	if len(files) == 0 {
+		return nil, nil // Not found is not an error
+	}
+
+	// Return first match (should only be one with exact name match)
+	f := files[0]
+	return &distribution.FileInfo{
+		ID:          f.Id,
+		Name:        f.Name,
+		MimeType:    f.MimeType,
+		Size:        f.Size,
+		CreatedTime: parseTime(f.CreatedTime),
+	}, nil
+}
+
 // parseTime parses a Google Drive timestamp string
 func parseTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)

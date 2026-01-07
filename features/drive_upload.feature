@@ -47,3 +47,32 @@ Feature: Google Drive Upload and Sharing
     And the permission API will fail
     When I attempt to set public sharing permission
     Then I should receive an error about permission failure
+
+  Scenario: Replace existing video file on upload
+    Given the Drive folder already contains:
+      | name             | mimeType  | size       |
+      | 2025-12-28.mp4   | video/mp4 | 1073741824 |
+    And I have a video file at "/tmp/2025-12-28.mp4"
+    When I upload the video to the Services folder
+    Then the file "2025-12-28.mp4" should be deleted before upload
+    And the upload should succeed
+    And the upload output should contain "Replacing existing 2025-12-28.mp4"
+
+  Scenario: Replace existing audio file on upload
+    Given the Drive folder already contains:
+      | name             | mimeType  | size     |
+      | 2025-12-28.mp3   | audio/mp3 | 89128960 |
+    And I have an audio file at "/tmp/2025-12-28.mp3"
+    When I upload the audio to the Services folder
+    Then the file "2025-12-28.mp3" should be deleted before upload
+    And the upload should succeed
+
+  Scenario: No replacement needed for new file
+    Given the Drive folder already contains:
+      | name             | mimeType  | size       |
+      | 2025-12-21.mp4   | video/mp4 | 1073741824 |
+    And I have a video file at "/tmp/2025-12-28.mp4"
+    When I upload the video to the Services folder
+    Then no files should be deleted before upload
+    And the upload should succeed
+    And the upload output should not contain "Replacing existing"

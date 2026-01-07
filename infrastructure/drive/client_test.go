@@ -3,6 +3,7 @@ package drive
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,22 @@ type mockDriveService struct {
 func (m *mockDriveService) ListFiles(ctx context.Context, query string, fields string, orderBy string) ([]*drive.File, error) {
 	if m.shouldFail {
 		return nil, m.failError
+	}
+	// Filter files by name if query contains "name = " (for FindFileByName support)
+	if strings.Contains(query, "name = ") {
+		// Extract the filename from the query
+		start := strings.Index(query, "name = '") + 8
+		end := strings.Index(query[start:], "'") + start
+		if start > 8 && end > start {
+			targetName := query[start:end]
+			var result []*drive.File
+			for _, f := range m.files {
+				if f.Name == targetName {
+					result = append(result, f)
+				}
+			}
+			return result, nil
+		}
 	}
 	return m.files, nil
 }
@@ -490,6 +507,104 @@ func TestClient_EmptyTrash(t *testing.T) {
 
 			if !tt.mock.trashEmptied {
 				t.Error("expected trash to be emptied")
+			}
+		})
+	}
+}
+
+func TestClient_FindFileByName(t *testing.T) {
+	testTime := time.Date(2025, 12, 28, 10, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		mock      *mockDriveService
+		folderID  string
+		fileName  string
+		wantFound bool
+		wantErr   bool
+		errMsg    string
+	}{
+		{
+			name: "finds existing file",
+			mock: &mockDriveService{
+				files: []*drive.File{
+					{
+						Id:          "file-1",
+						Name:        "2025-12-28.mp4",
+						MimeType:    "video/mp4",
+						Size:        1000000,
+						CreatedTime: testTime.Format(time.RFC3339),
+					},
+				},
+			},
+			folderID:  "test-folder-id",
+			fileName:  "2025-12-28.mp4",
+			wantFound: true,
+			wantErr:   false,
+		},
+		{
+			name: "returns nil for non-existent file",
+			mock: &mockDriveService{
+				files: []*drive.File{
+					{
+						Id:   "file-1",
+						Name: "2025-12-21.mp4",
+					},
+				},
+			},
+			folderID:  "test-folder-id",
+			fileName:  "2025-12-28.mp4",
+			wantFound: false,
+			wantErr:   false,
+		},
+		{
+			name: "returns nil for empty folder",
+			mock: &mockDriveService{
+				files: []*drive.File{},
+			},
+			folderID:  "test-folder-id",
+			fileName:  "2025-12-28.mp4",
+			wantFound: false,
+			wantErr:   false,
+		},
+		{
+			name: "handles API error",
+			mock: &mockDriveService{
+				shouldFail: true,
+				failError:  fmt.Errorf("API error"),
+			},
+			folderID: "test-folder-id",
+			fileName: "2025-12-28.mp4",
+			wantErr:  true,
+			errMsg:   "failed to find file by name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, _ := NewClient(context.Background(), "", WithDriveService(tt.mock))
+
+			result, err := client.FindFileByName(context.Background(), tt.folderID, tt.fileName)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				} else if tt.errMsg != "" && !containsString(err.Error(), tt.errMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errMsg, err.Error())
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if tt.wantFound && result == nil {
+				t.Error("expected to find file but got nil")
+			}
+			if !tt.wantFound && result != nil {
+				t.Errorf("expected nil but got file: %v", result)
 			}
 		})
 	}

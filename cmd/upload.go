@@ -142,7 +142,7 @@ func RunUploadWithDependencies(
 	audioOnly bool,
 	output io.Writer,
 ) error {
-	service := appdist.NewUploadService(driveClient, folderID)
+	service := appdist.NewUploadService(driveClient, folderID, output)
 
 	// Upload video if not audio-only
 	if !audioOnly && videoPath != "" {
