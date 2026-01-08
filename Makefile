@@ -1,4 +1,4 @@
-.PHONY: build build-detection test test-unit test-integration check clean install install-deps install-python-deps install-scheduled-task uninstall-scheduled-task help
+.PHONY: build build-detection test test-unit test-integration check clean install install-deps install-python-deps install-scheduled-task uninstall-scheduled-task update-and-install test-production help
 
 # Default target
 all: check
@@ -18,6 +18,19 @@ install:
 # Install the binary with detection to $GOPATH/bin
 install-detection:
 	go install -tags=detection .
+
+# Default recipient for test-production
+RECIPIENT ?= Jonathan
+
+# Pull latest changes and install the binary with detection
+update-and-install:
+	git pull
+	$(MAKE) install-detection
+
+# Update, install, and run the binary in production mode
+# Usage: make test-production [RECIPIENT=Name]
+test-production: update-and-install
+	nac-service-media process --recipient $(RECIPIENT)
 
 # Install system dependencies (Ubuntu/Debian)
 install-deps:
@@ -87,6 +100,8 @@ help:
 	@echo "  build-detection          - Build with auto-detection (requires OpenCV + Python)"
 	@echo "  install                  - Install to GOPATH/bin"
 	@echo "  install-detection        - Install with detection to GOPATH/bin"
+	@echo "  update-and-install       - Git pull and install with detection"
+	@echo "  test-production          - Update, install, and run process (RECIPIENT=Jonathan)"
 	@echo "  install-deps             - Install system dependencies (Ubuntu/Debian)"
 	@echo "  install-python-deps      - Install Python packages for end detection"
 	@echo "  install-scheduled-task   - Install Windows Scheduled Tasks (Sunday & Wednesday) (WSL only)"
