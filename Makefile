@@ -1,23 +1,23 @@
-.PHONY: build build-detection test test-unit test-integration check clean install install-deps install-python-deps install-scheduled-task uninstall-scheduled-task update-and-install test-production help
+.PHONY: build build-no-detection test test-unit test-integration check clean install install-no-detection install-deps install-python-deps install-scheduled-task uninstall-scheduled-task update-and-install test-production help
 
 # Default target
 all: check
 
-# Build the binary (without detection)
+# Build the binary with auto-detection enabled (default, requires OpenCV + Python)
 build:
-	go build -o bin/nac-service-media .
-
-# Build with auto-detection enabled (requires OpenCV + Python)
-build-detection:
 	go build -tags=detection -o bin/nac-service-media .
 
-# Install the binary to $GOPATH/bin
-install:
-	go install .
+# Build without detection
+build-no-detection:
+	go build -o bin/nac-service-media .
 
-# Install the binary with detection to $GOPATH/bin
-install-detection:
+# Install the binary with detection to $GOPATH/bin (default)
+install:
 	go install -tags=detection .
+
+# Install the binary without detection to $GOPATH/bin
+install-no-detection:
+	go install .
 
 # Default recipient for test-production
 RECIPIENT ?= Jonathan
@@ -25,7 +25,7 @@ RECIPIENT ?= Jonathan
 # Pull latest changes and install the binary with detection
 update-and-install:
 	git pull
-	$(MAKE) install-detection
+	$(MAKE) install
 
 # Update, install, and run the binary in production mode
 # Usage: make test-production [RECIPIENT=Name]
@@ -43,7 +43,7 @@ install-python-deps:
 	pip3 install librosa numpy scipy
 
 # Install Windows Scheduled Tasks (WSL only - calls PowerShell)
-install-scheduled-task: install-detection
+install-scheduled-task: install
 	@echo "Installing Windows Scheduled Tasks..."
 	@# Ensure PATH includes ~/go/bin in .profile (not .bashrc, which has non-interactive guard)
 	@if ! grep -q 'export PATH=.*\$$HOME/go/bin' ~/.profile 2>/dev/null; then \
@@ -96,10 +96,10 @@ lint:
 help:
 	@echo "Available targets:"
 	@echo "  all                      - Run check (default)"
-	@echo "  build                    - Build the binary (no detection)"
-	@echo "  build-detection          - Build with auto-detection (requires OpenCV + Python)"
-	@echo "  install                  - Install to GOPATH/bin"
-	@echo "  install-detection        - Install with detection to GOPATH/bin"
+	@echo "  build                    - Build with auto-detection (default, requires OpenCV + Python)"
+	@echo "  build-no-detection       - Build without detection"
+	@echo "  install                  - Install with detection to GOPATH/bin (default)"
+	@echo "  install-no-detection     - Install without detection to GOPATH/bin"
 	@echo "  update-and-install       - Git pull and install with detection"
 	@echo "  test-production          - Update, install, and run process (RECIPIENT=Jonathan)"
 	@echo "  install-deps             - Install system dependencies (Ubuntu/Debian)"
