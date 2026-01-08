@@ -247,3 +247,77 @@ Feature: End-to-End Process Command
       | --skip-video |                                    |
     Then the process should succeed
     And the output should include "Removed: 2025-11-01.mp4"
+
+  # Skip already-processed file scenarios
+  Scenario: Skip already-processed file in auto-detect mode
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    And drive has processed files:
+      | name           |
+      | 2025-12-28.mp4 |
+      | 2025-12-28.mp3 |
+    When I run process with flags:
+      | flag       | value    |
+      | --start    | 00:05:30 |
+      | --end      | 01:45:00 |
+      | --minister | smith    |
+      | --recipient| jane     |
+    Then the process should fail with error "has already been processed"
+    And the error should suggest command "--input"
+
+  Scenario: Process partial upload when only mp3 exists in Drive
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    And drive has processed files:
+      | name           |
+      | 2025-12-28.mp3 |
+    When I run process with flags:
+      | flag       | value    |
+      | --start    | 00:05:30 |
+      | --end      | 01:45:00 |
+      | --minister | smith    |
+      | --recipient| jane     |
+    Then the process should succeed
+    And the video should be uploaded to Drive
+    And the audio should be uploaded to Drive
+
+  Scenario: Process when mp4 exists but mp3 missing
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    And drive has processed files:
+      | name           |
+      | 2025-12-28.mp4 |
+    When I run process with flags:
+      | flag       | value    |
+      | --start    | 00:05:30 |
+      | --end      | 01:45:00 |
+      | --minister | smith    |
+      | --recipient| jane     |
+    Then the process should succeed
+    And the video should be uploaded to Drive
+    And the audio should be uploaded to Drive
+
+  Scenario: Explicit input bypasses already-processed check
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    And drive has processed files:
+      | name           |
+      | 2025-12-28.mp4 |
+      | 2025-12-28.mp3 |
+    When I run process with flags:
+      | flag       | value                              |
+      | --input    | /test/source/2025-12-28 10-06-16.mp4 |
+      | --start    | 00:05:30                           |
+      | --end      | 01:45:00                           |
+      | --minister | smith                              |
+      | --recipient| jane                               |
+    Then the process should succeed
+    And the video should be uploaded to Drive
+    And the audio should be uploaded to Drive
+
+  Scenario: Drive API error during already-processed check
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    And drive will fail file lookup with "authentication expired"
+    When I run process with flags:
+      | flag       | value    |
+      | --start    | 00:05:30 |
+      | --end      | 01:45:00 |
+      | --minister | smith    |
+      | --recipient| jane     |
+    Then the process should fail with error "failed to check Drive"
