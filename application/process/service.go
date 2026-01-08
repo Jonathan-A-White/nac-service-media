@@ -106,7 +106,7 @@ func (s *Service) Process(ctx context.Context, input Input) (*Result, error) {
 	startTime := time.Now()
 
 	// Step 0: Validate all inputs before starting
-	sourcePath, serviceDate, recipients, ccRecipients, ministerName, senderName, err := s.validateInputs(input)
+	sourcePath, serviceDate, recipients, ccRecipients, ministerName, senderName, err := s.validateInputs(ctx, input)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +274,7 @@ func (s *Service) processAudioOnly(ctx context.Context, input Input, sourcePath 
 	}, nil
 }
 
-func (s *Service) validateInputs(input Input) (sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName, senderName string, err error) {
+func (s *Service) validateInputs(ctx context.Context, input Input) (sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName, senderName string, err error) {
 	// Resolve source path
 	sourcePath = input.InputPath
 	if sourcePath == "" {
@@ -308,6 +308,25 @@ func (s *Service) validateInputs(input Input) (sourcePath string, serviceDate ti
 		serviceDate, err = inferDateFromFilename(filepath.Base(sourcePath))
 		if err != nil {
 			err = fmt.Errorf("cannot infer date from filename %q. Use --date to specify: %w", filepath.Base(sourcePath), err)
+			return
+		}
+	}
+
+	// Check if file was already processed (only in auto-detect mode)
+	if input.InputPath == "" {
+		dateStr := serviceDate.Format("2006-01-02")
+		mp4File, mp4Err := s.driveClient.FindFileByName(ctx, s.cfg.Google.ServicesFolderID, dateStr+".mp4")
+		if mp4Err != nil {
+			err = fmt.Errorf("failed to check Drive for existing files: %w", mp4Err)
+			return
+		}
+		mp3File, mp3Err := s.driveClient.FindFileByName(ctx, s.cfg.Google.ServicesFolderID, dateStr+".mp3")
+		if mp3Err != nil {
+			err = fmt.Errorf("failed to check Drive for existing files: %w", mp3Err)
+			return
+		}
+		if mp4File != nil && mp3File != nil {
+			err = fmt.Errorf("Most recent file (%s) has already been processed. Use --input to specify a different file.", dateStr)
 			return
 		}
 	}

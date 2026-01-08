@@ -165,18 +165,20 @@ func (m *processMockFileFinder) ListFiles(dir, ext string) ([]string, error) {
 }
 
 type processMockDriveService struct {
-	files          []*googledrive.File
-	uploadedFiles  []*googledrive.File
-	permissions    map[string]*googledrive.Permission
-	shouldFail     bool
-	failError      error
-	uploadFails    bool
-	uploadError    error
-	storageLimit   int64
-	storageUsage   int64
-	deletedFileIDs []string
-	trashEmptied   bool
-	nextFileID     int
+	files           []*googledrive.File
+	uploadedFiles   []*googledrive.File
+	permissions     map[string]*googledrive.Permission
+	shouldFail      bool
+	failError       error
+	uploadFails     bool
+	uploadError     error
+	storageLimit    int64
+	storageUsage    int64
+	deletedFileIDs  []string
+	trashEmptied    bool
+	nextFileID      int
+	fileLookupFails bool   // For FindFileByName failures
+	fileLookupError error  // Error to return from FindFileByName
 }
 
 func newProcessMockDriveService() *processMockDriveService {
@@ -192,6 +194,10 @@ func (m *processMockDriveService) ListFiles(ctx context.Context, query string, f
 	if m.shouldFail {
 		return nil, m.failError
 	}
+	// Check for file lookup failure (used for FindFileByName via ListFiles query)
+	if m.fileLookupFails && strings.Contains(query, "name = ") {
+		return nil, m.fileLookupError
+	}
 	// Filter out deleted files
 	var result []*googledrive.File
 	for _, f := range m.files {
@@ -203,7 +209,20 @@ func (m *processMockDriveService) ListFiles(ctx context.Context, query string, f
 			}
 		}
 		if !deleted {
-			result = append(result, f)
+			// If query contains a name filter, only return matching files
+			if strings.Contains(query, "name = '") {
+				// Extract filename from query like "name = '2025-12-28.mp4'"
+				start := strings.Index(query, "name = '") + 8
+				end := strings.Index(query[start:], "'")
+				if end > 0 {
+					searchName := query[start : start+end]
+					if f.Name == searchName {
+						result = append(result, f)
+					}
+				}
+			} else {
+				result = append(result, f)
+			}
 		}
 	}
 	// Sort by name (oldest first)
@@ -366,6 +385,8 @@ func InitializeProcessScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^drive has very insufficient space for audio$`, driveHasVeryInsufficientSpaceForAudio)
 	ctx.Step(`^drive has old files:$`, driveHasOldFiles)
 	ctx.Step(`^the drive upload will fail with "([^"]*)"$`, theDriveUploadWillFailWith)
+	ctx.Step(`^drive has processed files:$`, driveHasProcessedFiles)
+	ctx.Step(`^drive will fail file lookup with "([^"]*)"$`, driveWillFailFileLookupWith)
 
 	// Action steps
 	ctx.Step(`^I run process with flags:$`, iRunProcessWithFlags)
@@ -548,6 +569,37 @@ func theDriveUploadWillFailWith(errorMsg string) error {
 	p := getProcessContext()
 	p.driveService.uploadFails = true
 	p.driveService.uploadError = fmt.Errorf("%s", errorMsg)
+	return nil
+}
+
+func driveHasProcessedFiles(table *godog.Table) error {
+	p := getProcessContext()
+	for i, row := range table.Rows {
+		if i == 0 {
+			continue // Skip header
+		}
+		name := row.Cells[0].Value
+		// Determine MIME type based on extension
+		var mimeType string
+		if strings.HasSuffix(name, ".mp4") {
+			mimeType = "video/mp4"
+		} else if strings.HasSuffix(name, ".mp3") {
+			mimeType = "audio/mpeg"
+		}
+		p.driveService.files = append(p.driveService.files, &googledrive.File{
+			Id:       fmt.Sprintf("processed-file-%d", i),
+			Name:     name,
+			MimeType: mimeType,
+			Size:     1000000, // 1MB placeholder
+		})
+	}
+	return nil
+}
+
+func driveWillFailFileLookupWith(errorMsg string) error {
+	p := getProcessContext()
+	p.driveService.fileLookupFails = true
+	p.driveService.fileLookupError = fmt.Errorf("%s", errorMsg)
 	return nil
 }
 
