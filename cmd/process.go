@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"time"
 
@@ -125,6 +126,33 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		videoPath = newest
 	} else if !filepath.IsAbs(videoPath) {
 		videoPath = filepath.Join(cfg.Paths.SourceDirectory, videoPath)
+	}
+
+	// Check if file was already processed (only in auto-detect mode, before running expensive detection)
+	if processInputPath == "" {
+		// Infer date from filename to check if already processed
+		serviceDate, err := inferDateFromFilename(filepath.Base(videoPath))
+		if err == nil {
+			// Create Drive client early to check for existing files
+			driveClient, err := drive.NewClientWithOAuth(ctx, cfg.Google.CredentialsFile, cfg.Google.TokenFile)
+			if err != nil {
+				return fmt.Errorf("failed to create Google Drive client: %w", err)
+			}
+
+			// Check if both mp4 and mp3 already exist on Drive
+			dateStr := serviceDate.Format("2006-01-02")
+			mp4File, mp4Err := driveClient.FindFileByName(ctx, cfg.Google.ServicesFolderID, dateStr+".mp4")
+			if mp4Err != nil {
+				return fmt.Errorf("failed to check Drive for existing files: %w", mp4Err)
+			}
+			mp3File, mp3Err := driveClient.FindFileByName(ctx, cfg.Google.ServicesFolderID, dateStr+".mp3")
+			if mp3Err != nil {
+				return fmt.Errorf("failed to check Drive for existing files: %w", mp3Err)
+			}
+			if mp4File != nil && mp3File != nil {
+				return fmt.Errorf("Most recent file (%s) has already been processed. Use --input to specify a different file.", dateStr)
+			}
+		}
 	}
 
 	// Detect start timestamp if not provided
@@ -460,6 +488,24 @@ func (a *fileFinderAdapter) FindNewestFile(dir, ext string) (string, error) {
 
 func (a *fileFinderAdapter) ListFiles(dir, ext string) ([]string, error) {
 	return a.finder.ListFiles(dir, ext)
+}
+
+// inferDateFromFilename extracts date from OBS-style filenames
+// Supports: "2025-12-28 10-06-16.mp4" or "2025-12-28.mp4"
+func inferDateFromFilename(filename string) (time.Time, error) {
+	// Pattern for OBS format: YYYY-MM-DD HH-MM-SS.mp4
+	obsPattern := regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+\d{2}-\d{2}-\d{2}\.mp4$`)
+	if matches := obsPattern.FindStringSubmatch(filename); len(matches) > 1 {
+		return time.Parse("2006-01-02", matches[1])
+	}
+
+	// Pattern for trimmed format: YYYY-MM-DD.mp4
+	trimmedPattern := regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\.mp4$`)
+	if matches := trimmedPattern.FindStringSubmatch(filename); len(matches) > 1 {
+		return time.Parse("2006-01-02", matches[1])
+	}
+
+	return time.Time{}, fmt.Errorf("filename does not match expected format")
 }
 
 // Ensure distribution.DriveClient is implemented

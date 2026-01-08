@@ -312,24 +312,8 @@ func (s *Service) validateInputs(ctx context.Context, input Input) (sourcePath s
 		}
 	}
 
-	// Check if file was already processed (only in auto-detect mode)
-	if input.InputPath == "" {
-		dateStr := serviceDate.Format("2006-01-02")
-		mp4File, mp4Err := s.driveClient.FindFileByName(ctx, s.cfg.Google.ServicesFolderID, dateStr+".mp4")
-		if mp4Err != nil {
-			err = fmt.Errorf("failed to check Drive for existing files: %w", mp4Err)
-			return
-		}
-		mp3File, mp3Err := s.driveClient.FindFileByName(ctx, s.cfg.Google.ServicesFolderID, dateStr+".mp3")
-		if mp3Err != nil {
-			err = fmt.Errorf("failed to check Drive for existing files: %w", mp3Err)
-			return
-		}
-		if mp4File != nil && mp3File != nil {
-			err = fmt.Errorf("Most recent file (%s) has already been processed. Use --input to specify a different file.", dateStr)
-			return
-		}
-	}
+	// Note: Already-processed check is now done earlier in cmd/process.go
+	// before auto-detection to avoid running expensive detection on already-processed files
 
 	// Lookup minister (optional - if key provided)
 	if input.MinisterKey != "" {
