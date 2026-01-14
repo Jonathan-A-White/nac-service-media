@@ -52,3 +52,6 @@ logs/
 
 # Thoughts symlink (managed separately)
 thoughts
+
+# Data directory for test files
+/data/

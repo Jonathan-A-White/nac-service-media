@@ -55,6 +55,8 @@ func (d *TemplateDetector) LoadTemplates(templatesDir string) error {
 	templateFiles := map[string]string{
 		"wide_lit":      "wide_lit.png",
 		"wide_unlit":    "wide_unlit.png",
+		"wide2_lit":     "wide2_lit.png",
+		"wide2_unlit":   "wide2_unlit.png",
 		"closeup_lit":   "closeup_lit.png",
 		"closeup_unlit": "closeup_unlit.png",
 		"medium_lit":    "medium_lit.png",
