@@ -110,11 +110,9 @@ func runSendEmail(cmd *cobra.Command, args []string) error {
 		Address: cfg.Email.FromAddress,
 	}
 
-	// Use a separate token file for Gmail (different scope than Drive)
-	gmailTokenFile := "gmail_token.json"
 	gmailClient, err := gmail.NewClientWithOAuth(ctx, gmail.OAuthConfig{
 		CredentialsFile: cfg.Google.CredentialsFile,
-		TokenFile:       gmailTokenFile,
+		TokenFile:       cfg.Google.GmailTokenFile,
 	}, from)
 	if err != nil {
 		return fmt.Errorf("failed to create Gmail client: %w", err)

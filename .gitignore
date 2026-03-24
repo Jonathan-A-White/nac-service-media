@@ -55,3 +55,10 @@ thoughts
 
 # Data directory for test files
 /data/
+
+# Gas Town (added by gt)
+.runtime/
+.claude/
+.logs/
+__pycache__/
+state.json

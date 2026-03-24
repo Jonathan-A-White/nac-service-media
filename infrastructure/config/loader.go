@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -74,6 +75,7 @@ type AudioConfig struct {
 type GoogleConfig struct {
 	CredentialsFile  string `yaml:"credentials_file"`
 	TokenFile        string `yaml:"token_file"`
+	GmailTokenFile   string `yaml:"gmail_token_file"`
 	ServicesFolderID string `yaml:"services_folder_id"`
 }
 
@@ -91,7 +93,10 @@ type RecipientConfig struct {
 	Address string `yaml:"address"`
 }
 
-// Load reads and parses the configuration from the specified YAML file
+// Load reads and parses the configuration from the specified YAML file.
+// Relative paths for Google credentials and token files are resolved
+// relative to the config file's directory, so tokens are always found
+// regardless of the working directory.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -103,7 +108,26 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Resolve Google file paths relative to config directory
+	cfgDir, _ := filepath.Abs(filepath.Dir(path))
+	cfg.Google.CredentialsFile = resolveRelativeTo(cfgDir, cfg.Google.CredentialsFile)
+	cfg.Google.TokenFile = resolveRelativeTo(cfgDir, cfg.Google.TokenFile)
+	if cfg.Google.GmailTokenFile == "" {
+		cfg.Google.GmailTokenFile = resolveRelativeTo(cfgDir, "gmail_token.json")
+	} else {
+		cfg.Google.GmailTokenFile = resolveRelativeTo(cfgDir, cfg.Google.GmailTokenFile)
+	}
+
 	return &cfg, nil
+}
+
+// resolveRelativeTo makes a relative path absolute by joining it with baseDir.
+// Already-absolute paths are returned unchanged. Empty paths are returned as-is.
+func resolveRelativeTo(baseDir, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(baseDir, path)
 }
 
 // Save writes the configuration to the specified YAML file

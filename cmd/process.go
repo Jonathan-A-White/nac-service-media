@@ -206,7 +206,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	}
 	gmailClient, err := gmail.NewClientWithOAuth(ctx, gmail.OAuthConfig{
 		CredentialsFile: cfg.Google.CredentialsFile,
-		TokenFile:       "gmail_token.json",
+		TokenFile:       cfg.Google.GmailTokenFile,
 	}, from)
 	if err != nil {
 		return fmt.Errorf("failed to create Gmail client: %w", err)

@@ -15,8 +15,12 @@ audio:
   bitrate: "192k"
 
 google:
-  # Path to Google service account credentials JSON file
+  # Path to Google OAuth client credentials JSON file
   credentials_file: "credentials.json"
+  # Token files for persisting OAuth tokens (auto-created on first auth)
+  # Paths are resolved relative to this config file's directory
+  token_file: "drive_token.json"
+  gmail_token_file: "gmail_token.json"
   # Google Drive folder ID for the Services folder
   # Find this in the URL when viewing the folder in Drive
   services_folder_id: "your-folder-id-here"
