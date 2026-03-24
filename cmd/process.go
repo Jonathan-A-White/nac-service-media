@@ -13,6 +13,7 @@ import (
 	appdetection "nac-service-media/application/detection"
 	appprocess "nac-service-media/application/process"
 	"nac-service-media/domain/distribution"
+	domainfs "nac-service-media/domain/filesystem"
 	"nac-service-media/domain/notification"
 	"nac-service-media/domain/video"
 	"nac-service-media/infrastructure/config"
@@ -353,6 +354,10 @@ func runProcessWithClients(
 	// Create file sizer
 	fileSizer := &productionFileSizer{}
 
+	// Create disk checker and file remover for local cleanup
+	diskChecker := filesystem.NewDiskUsageChecker()
+	fileRemover := filesystem.NewRemover()
+
 	// Create process service
 	service := appprocess.NewService(
 		trimmer,
@@ -364,6 +369,8 @@ func runProcessWithClients(
 		&fileFinderAdapter{finder: fileFinder},
 		cfg,
 		output,
+		diskChecker,
+		fileRemover,
 	)
 
 	// Build input
@@ -396,6 +403,8 @@ func RunProcessWithDependencies(
 	fileFinder FileFinder,
 	input ProcessInput,
 	output io.Writer,
+	diskChecker domainfs.DiskChecker,
+	fileRemover domainfs.FileRemover,
 ) error {
 	// Verify ffmpeg is available
 	if verifiable, ok := trimmer.(interface{ VerifyInstalled(context.Context) error }); ok {
@@ -433,6 +442,8 @@ func RunProcessWithDependencies(
 		&fileFinderAdapter{finder: fileFinder},
 		cfg,
 		output,
+		diskChecker,
+		fileRemover,
 	)
 
 	// Build input

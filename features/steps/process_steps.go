@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"nac-service-media/cmd"
+	domainfs "nac-service-media/domain/filesystem"
 	"nac-service-media/domain/video"
 	"nac-service-media/infrastructure/config"
 
@@ -34,6 +35,8 @@ type processContext struct {
 	driveService  *processMockDriveService
 	gmailService  *processMockGmailService
 	fileFinder    *processMockFileFinder
+	diskChecker   *processMockDiskChecker
+	fileRemover   *processMockFileRemover
 
 	// State
 	flags          map[string][]string
@@ -163,6 +166,32 @@ func (m *processMockFileFinder) FindNewestFile(dir, ext string) (string, error) 
 func (m *processMockFileFinder) ListFiles(dir, ext string) ([]string, error) {
 	return m.sourceFiles, nil
 }
+
+type processMockDiskChecker struct {
+	usage float64
+	err   error
+}
+
+func (m *processMockDiskChecker) UsagePercent(path string) (float64, error) {
+	return m.usage, m.err
+}
+
+var _ domainfs.DiskChecker = (*processMockDiskChecker)(nil)
+
+type processMockFileRemover struct {
+	removedFiles []string
+	err          error
+}
+
+func (m *processMockFileRemover) Remove(path string) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.removedFiles = append(m.removedFiles, path)
+	return nil
+}
+
+var _ domainfs.FileRemover = (*processMockFileRemover)(nil)
 
 type processMockDriveService struct {
 	files           []*googledrive.File
@@ -350,6 +379,8 @@ func InitializeProcessScenario(ctx *godog.ScenarioContext) {
 			driveService: newProcessMockDriveService(),
 			gmailService: &processMockGmailService{},
 			fileFinder:   &processMockFileFinder{},
+			diskChecker:  &processMockDiskChecker{usage: 50.0},
+			fileRemover:  &processMockFileRemover{},
 			flags:        make(map[string][]string),
 			output:       &bytes.Buffer{},
 		}
@@ -645,6 +676,8 @@ func iRunProcessWithFlags(table *godog.Table) error {
 		p.fileFinder,
 		input,
 		p.output,
+		p.diskChecker,
+		p.fileRemover,
 	)
 
 	// Capture state for assertions

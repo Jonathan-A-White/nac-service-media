@@ -8,10 +8,13 @@ import (
 	"regexp"
 	"time"
 
+	"sort"
+
 	appdist "nac-service-media/application/distribution"
 	appnotif "nac-service-media/application/notification"
 	appvideo "nac-service-media/application/video"
 	"nac-service-media/domain/distribution"
+	domainfs "nac-service-media/domain/filesystem"
 	"nac-service-media/domain/notification"
 	"nac-service-media/domain/video"
 	"nac-service-media/infrastructure/config"
@@ -39,6 +42,8 @@ type Service struct {
 	fileFinder  FileFinder
 	cfg         *config.Config
 	output      io.Writer
+	diskChecker domainfs.DiskChecker
+	fileRemover domainfs.FileRemover
 }
 
 // NewService creates a new process service
@@ -52,6 +57,8 @@ func NewService(
 	fileFinder FileFinder,
 	cfg *config.Config,
 	output io.Writer,
+	diskChecker domainfs.DiskChecker,
+	fileRemover domainfs.FileRemover,
 ) *Service {
 	return &Service{
 		trimmer:     trimmer,
@@ -63,6 +70,8 @@ func NewService(
 		fileFinder:  fileFinder,
 		cfg:         cfg,
 		output:      output,
+		diskChecker: diskChecker,
+		fileRemover: fileRemover,
 	}
 }
 
@@ -86,6 +95,14 @@ type Result struct {
 	VideoURL    string
 	AudioURL    string
 	ServiceDate time.Time
+}
+
+// CleanupInput captures pre-processing state needed for local file cleanup
+type CleanupInput struct {
+	IsNewlyProcessed bool
+	SourcePath       string
+	ServiceDate      time.Time
+	SkipVideo        bool
 }
 
 // ValidationError contains details about a validation failure with suggestions
@@ -121,15 +138,21 @@ func (s *Service) Process(ctx context.Context, input Input) (*Result, error) {
 	}
 	fmt.Fprintln(s.output)
 
+	// Compute cleanup state before processing creates new files
+	cleanupInput := s.computeCleanupInput(input.SkipVideo, sourcePath, serviceDate)
+
+	// Pre-processing cleanup: free space if disk is critically full (>90%)
+	s.cleanupLocalFiles(cleanupInput, 90.0, "Pre-processing")
+
 	// Route to appropriate workflow
 	if input.SkipVideo {
-		return s.processAudioOnly(ctx, input, sourcePath, serviceDate, recipients, ccRecipients, ministerName, senderName, startTime)
+		return s.processAudioOnly(ctx, input, sourcePath, serviceDate, recipients, ccRecipients, ministerName, senderName, startTime, cleanupInput)
 	}
-	return s.processFullWorkflow(ctx, input, sourcePath, serviceDate, recipients, ccRecipients, ministerName, senderName, startTime)
+	return s.processFullWorkflow(ctx, input, sourcePath, serviceDate, recipients, ccRecipients, ministerName, senderName, startTime, cleanupInput)
 }
 
 // processFullWorkflow handles the standard video+audio workflow
-func (s *Service) processFullWorkflow(ctx context.Context, input Input, sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName, senderName string, processStartTime time.Time) (*Result, error) {
+func (s *Service) processFullWorkflow(ctx context.Context, input Input, sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName, senderName string, processStartTime time.Time, cleanupInput CleanupInput) (*Result, error) {
 	// Step 1: Trim video
 	fmt.Fprintf(s.output, "[1/7] Trimming video...\n")
 	trimResult, err := s.trimVideo(ctx, sourcePath, input.StartTime, input.EndTime)
@@ -204,6 +227,9 @@ func (s *Service) processFullWorkflow(ctx context.Context, input Input, sourcePa
 	elapsed := time.Since(processStartTime)
 	fmt.Fprintf(s.output, "Done! Completed in %s\n", formatDuration(elapsed))
 
+	// Post-processing cleanup: free space if disk is getting full (>70%)
+	s.cleanupLocalFiles(cleanupInput, 70.0, "Post-processing")
+
 	return &Result{
 		TrimmedPath: trimResult.OutputPath,
 		AudioPath:   audioResult.OutputPath,
@@ -214,7 +240,7 @@ func (s *Service) processFullWorkflow(ctx context.Context, input Input, sourcePa
 }
 
 // processAudioOnly handles the audio-only workflow (--skip-video mode)
-func (s *Service) processAudioOnly(ctx context.Context, input Input, sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName, senderName string, processStartTime time.Time) (*Result, error) {
+func (s *Service) processAudioOnly(ctx context.Context, input Input, sourcePath string, serviceDate time.Time, recipients, ccRecipients []notification.Recipient, ministerName, senderName string, processStartTime time.Time, cleanupInput CleanupInput) (*Result, error) {
 	// Step 1: Extract audio directly from source with timestamps
 	fmt.Fprintf(s.output, "[1/4] Extracting audio...\n")
 	audioResult, err := s.extractAudioWithTimestamps(ctx, sourcePath, serviceDate, input.StartTime, input.EndTime)
@@ -264,6 +290,9 @@ func (s *Service) processAudioOnly(ctx context.Context, input Input, sourcePath 
 
 	elapsed := time.Since(processStartTime)
 	fmt.Fprintf(s.output, "Done! Completed in %s\n", formatDuration(elapsed))
+
+	// Post-processing cleanup: free space if disk is getting full (>70%)
+	s.cleanupLocalFiles(cleanupInput, 70.0, "Post-processing")
 
 	return &Result{
 		TrimmedPath: "", // No trimmed video
@@ -535,6 +564,92 @@ func inferDateFromFilename(filename string) (time.Time, error) {
 	}
 
 	return time.Time{}, fmt.Errorf("filename does not match expected format")
+}
+
+func (s *Service) computeCleanupInput(skipVideo bool, sourcePath string, serviceDate time.Time) CleanupInput {
+	dateStr := serviceDate.Format("2006-01-02")
+	audioPath := filepath.Join(s.cfg.Paths.AudioDirectory, dateStr+".mp3")
+	audioExists := s.fileChecker.Exists(audioPath)
+
+	if skipVideo {
+		return CleanupInput{
+			IsNewlyProcessed: !audioExists,
+			SourcePath:       sourcePath,
+			ServiceDate:      serviceDate,
+			SkipVideo:        true,
+		}
+	}
+
+	trimmedPath := filepath.Join(s.cfg.Paths.TrimmedDirectory, dateStr+".mp4")
+	trimmedExists := s.fileChecker.Exists(trimmedPath)
+
+	return CleanupInput{
+		IsNewlyProcessed: !trimmedExists || !audioExists,
+		SourcePath:       sourcePath,
+		ServiceDate:      serviceDate,
+		SkipVideo:        false,
+	}
+}
+
+func (s *Service) cleanupLocalFiles(input CleanupInput, threshold float64, label string) {
+	if !input.IsNewlyProcessed {
+		return
+	}
+
+	usage, err := s.diskChecker.UsagePercent(s.cfg.Paths.SourceDirectory)
+	if err != nil {
+		fmt.Fprintf(s.output, "\nNote: %s disk check failed: %v\n", label, err)
+		return
+	}
+
+	if usage <= threshold {
+		return
+	}
+
+	fmt.Fprintf(s.output, "\n%s disk cleanup (%.0f%% > %.0f%%)...\n", label, usage, threshold)
+
+	dateStr := input.ServiceDate.Format("2006-01-02")
+
+	// Delete oldest source recording
+	if err := s.deleteOldestFile(s.cfg.Paths.SourceDirectory, ".mp4", input.SourcePath); err != nil {
+		fmt.Fprintf(s.output, "  Warning: source cleanup: %v\n", err)
+	}
+
+	// Delete oldest audio
+	audioExclude := filepath.Join(s.cfg.Paths.AudioDirectory, dateStr+".mp3")
+	if err := s.deleteOldestFile(s.cfg.Paths.AudioDirectory, ".mp3", audioExclude); err != nil {
+		fmt.Fprintf(s.output, "  Warning: audio cleanup: %v\n", err)
+	}
+
+	// Delete oldest trimmed (full workflow only)
+	if !input.SkipVideo {
+		trimmedExclude := filepath.Join(s.cfg.Paths.TrimmedDirectory, dateStr+".mp4")
+		if err := s.deleteOldestFile(s.cfg.Paths.TrimmedDirectory, ".mp4", trimmedExclude); err != nil {
+			fmt.Fprintf(s.output, "  Warning: trimmed cleanup: %v\n", err)
+		}
+	}
+}
+
+func (s *Service) deleteOldestFile(dir, ext, excludePath string) error {
+	files, err := s.fileFinder.ListFiles(dir, ext)
+	if err != nil {
+		return fmt.Errorf("list files in %s: %w", dir, err)
+	}
+
+	sort.Strings(files)
+
+	for _, f := range files {
+		if f == excludePath {
+			continue
+		}
+		if err := s.fileRemover.Remove(f); err != nil {
+			return fmt.Errorf("delete %s: %w", filepath.Base(f), err)
+		}
+		fmt.Fprintf(s.output, "  Deleted: %s\n", filepath.Base(f))
+		return nil
+	}
+
+	return nil
 }
 
 func formatDuration(d time.Duration) string {
