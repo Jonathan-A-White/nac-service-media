@@ -94,9 +94,9 @@ type RecipientConfig struct {
 }
 
 // Load reads and parses the configuration from the specified YAML file.
-// Relative paths for Google credentials and token files are resolved
-// relative to the config file's directory, so tokens are always found
-// regardless of the working directory.
+// Relative paths for Google credentials and token files are converted to
+// absolute paths (relative to CWD at load time), so tokens are always
+// saved and loaded from the same location.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -108,26 +108,29 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	// Resolve Google file paths relative to config directory
-	cfgDir, _ := filepath.Abs(filepath.Dir(path))
-	cfg.Google.CredentialsFile = resolveRelativeTo(cfgDir, cfg.Google.CredentialsFile)
-	cfg.Google.TokenFile = resolveRelativeTo(cfgDir, cfg.Google.TokenFile)
+	// Convert relative paths to absolute so tokens are always found
+	cfg.Google.CredentialsFile = toAbsPath(cfg.Google.CredentialsFile)
+	cfg.Google.TokenFile = toAbsPath(cfg.Google.TokenFile)
 	if cfg.Google.GmailTokenFile == "" {
-		cfg.Google.GmailTokenFile = resolveRelativeTo(cfgDir, "gmail_token.json")
+		cfg.Google.GmailTokenFile = toAbsPath("gmail_token.json")
 	} else {
-		cfg.Google.GmailTokenFile = resolveRelativeTo(cfgDir, cfg.Google.GmailTokenFile)
+		cfg.Google.GmailTokenFile = toAbsPath(cfg.Google.GmailTokenFile)
 	}
 
 	return &cfg, nil
 }
 
-// resolveRelativeTo makes a relative path absolute by joining it with baseDir.
+// toAbsPath converts a relative path to absolute using the current working directory.
 // Already-absolute paths are returned unchanged. Empty paths are returned as-is.
-func resolveRelativeTo(baseDir, path string) string {
+func toAbsPath(path string) string {
 	if path == "" || filepath.IsAbs(path) {
 		return path
 	}
-	return filepath.Join(baseDir, path)
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return abs
 }
 
 // Save writes the configuration to the specified YAML file
