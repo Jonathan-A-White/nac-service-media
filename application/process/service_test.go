@@ -159,16 +159,16 @@ func (m *mockDriveClient) UploadAndShare(ctx context.Context, req distribution.U
 
 // mockEmailSender implements notification.EmailSender for testing
 type mockEmailSender struct {
-	sentEmails []notification.Email
+	sentEmails []*notification.EmailRequest
 	shouldFail bool
 	failError  error
 }
 
-func (m *mockEmailSender) Send(email notification.Email) error {
+func (m *mockEmailSender) Send(req *notification.EmailRequest) error {
 	if m.shouldFail {
 		return m.failError
 	}
-	m.sentEmails = append(m.sentEmails, email)
+	m.sentEmails = append(m.sentEmails, req)
 	return nil
 }
 
