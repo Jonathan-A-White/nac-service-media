@@ -212,6 +212,18 @@ func TestFormatServiceRef(t *testing.T) {
 			now:         sunday.AddDate(0, 0, 14),
 			want:        "the 12/28",
 		},
+		{
+			name:        "friday service two days later",
+			serviceDate: time.Date(2026, 4, 3, 10, 0, 0, 0, time.Local), // Friday
+			now:         time.Date(2026, 4, 5, 10, 0, 0, 0, time.Local), // Sunday
+			want:        "Friday's",
+		},
+		{
+			name:        "wednesday service three days later",
+			serviceDate: time.Date(2026, 4, 1, 10, 0, 0, 0, time.Local), // Wednesday
+			now:         time.Date(2026, 4, 4, 10, 0, 0, 0, time.Local), // Saturday
+			want:        "Wednesday's",
+		},
 	}
 
 	for _, tt := range tests {

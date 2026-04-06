@@ -12,7 +12,7 @@ type TemplateData struct {
 	Greeting      string // Dynamic greeting based on recipient count
 	ChurchName    string
 	DateFormatted string // e.g., "12/28/2025"
-	ServiceRef    string // "today's", "yesterday's", or "Sunday's" based on when email is sent
+	ServiceRef    string // "today's", "yesterday's", or "Friday's" etc. based on when email is sent
 	MinisterName  string
 	AudioURL      string
 	VideoURL      string
@@ -84,7 +84,7 @@ func getFirstName(fullName string) string {
 // the service date relative to the current date:
 // - Same day: "today's"
 // - Yesterday: "yesterday's"
-// - 2-6 days ago: "Sunday's" (assuming services are on Sunday)
+// - 2-6 days ago: "Friday's", "Sunday's", etc. (actual day of week)
 // - 7+ days ago: "the 12/28" (explicit date reference)
 func FormatServiceRef(serviceDate, now time.Time) string {
 	// Normalize to date only (ignore time component)
@@ -99,7 +99,7 @@ func FormatServiceRef(serviceDate, now time.Time) string {
 	case diff == 1:
 		return "yesterday's"
 	case diff < 7:
-		return "Sunday's"
+		return serviceDate.Weekday().String() + "'s"
 	default:
 		// More than a week old - use explicit date
 		return fmt.Sprintf("the %s", serviceDate.Format("1/2"))
