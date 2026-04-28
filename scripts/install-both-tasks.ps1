@@ -22,6 +22,21 @@ if (-not (Test-Path $InstallScript)) {
     exit 1
 }
 
+# Legacy task name from before the Sunday/Wednesday split.
+# Earlier versions installed a single "NAC-Service-Media-Weekly" task on
+# Sunday at 12:30 PM. If left in place alongside the new Sunday task it fires
+# concurrently and causes duplicate uploads/emails.
+$LegacyTaskName = "NAC-Service-Media-Weekly"
+
+function Remove-LegacyTask {
+    $existing = Get-ScheduledTask -TaskName $LegacyTaskName -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Host "Removing legacy task: $LegacyTaskName"
+        Unregister-ScheduledTask -TaskName $LegacyTaskName -Confirm:$false
+        Write-Host "Legacy task removed"
+    }
+}
+
 # Handle uninstall
 if ($Uninstall) {
     Write-Host "=========================================="
@@ -39,6 +54,10 @@ if ($Uninstall) {
     & $InstallScript -TaskName "NAC-Service-Media-Weekly-Wednesday" -Uninstall
     Write-Host ""
 
+    # Uninstall legacy task if present
+    Remove-LegacyTask
+    Write-Host ""
+
     Write-Host "=========================================="
     Write-Host "Uninstallation complete"
     Write-Host "=========================================="
@@ -53,6 +72,11 @@ Write-Host ""
 $InstallArgs = @{
     SkipBinaryInstall = $SkipBinaryInstall
 }
+
+# Remove legacy single-task installation if present (would fire alongside the
+# new Sunday task and cause duplicate runs).
+Remove-LegacyTask
+Write-Host ""
 
 # Install Sunday task (12:30 PM)
 Write-Host "Installing Sunday task (12:30 PM)..."

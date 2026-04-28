@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,9 +22,15 @@ import (
 	"nac-service-media/infrastructure/ffmpeg"
 	"nac-service-media/infrastructure/filesystem"
 	"nac-service-media/infrastructure/gmail"
+	"nac-service-media/infrastructure/lock"
 
 	"github.com/spf13/cobra"
 )
+
+// processLockFileName lives in os.TempDir() and serializes concurrent
+// `process` invocations. Without this, two scheduled tasks firing at once
+// race past the already-processed check and upload duplicate copies.
+const processLockFileName = "nac-service-media-process.lock"
 
 var (
 	processInputPath     string
@@ -107,6 +114,17 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	if cfg == nil {
 		return fmt.Errorf("configuration not loaded; ensure config/config.yaml exists")
 	}
+
+	lockPath := filepath.Join(os.TempDir(), processLockFileName)
+	fl, err := lock.Acquire(lockPath)
+	if err != nil {
+		if errors.Is(err, lock.ErrAlreadyHeld) {
+			fmt.Fprintf(os.Stdout, "Another nac-service-media process run is in progress (lock: %s); skipping this invocation.\n", lockPath)
+			return nil
+		}
+		return fmt.Errorf("failed to acquire process lock: %w", err)
+	}
+	defer fl.Release()
 
 	ctx := cmd.Context()
 
