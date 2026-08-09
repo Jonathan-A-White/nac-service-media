@@ -18,6 +18,7 @@ param(
 # Get script paths
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $ScheduledTaskScript = Join-Path $ScriptDir "scheduled-task.ps1"
+$ProjectDir = Split-Path -Parent $ScriptDir
 
 # Verify scheduled-task.ps1 exists
 if (-not (Test-Path $ScheduledTaskScript)) {
@@ -50,8 +51,11 @@ $StepNum = 1
 
 if (-not $SkipBinaryInstall) {
     # Step 1: Install the binary via WSL
+    # Derive the project path from this script's own location rather than
+    # hardcoding it -- the checkout is not always at the same place.
     Write-Host "Step $StepNum`: Installing binary via WSL..."
-    $InstallOutput = wsl.exe -d Ubuntu -- bash -lc "cd ~/src/nac/nac-service-media && make install-detection" 2>&1
+    $WslProjectDir = (wsl.exe -d Ubuntu wslpath -u ($ProjectDir -replace '\\', '/')).Trim()
+    $InstallOutput = wsl.exe -d Ubuntu -- bash -lc "cd '$WslProjectDir' && make install" 2>&1
     $InstallExitCode = $LASTEXITCODE
 
     if ($InstallExitCode -ne 0) {
@@ -100,12 +104,31 @@ $Action = New-ScheduledTaskAction `
 $DayOfWeek = [System.DayOfWeek]::$TriggerDay
 $Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DayOfWeek -At $TriggerTime
 
+# New-ScheduledTaskTrigger bakes the UTC offset in effect on the install date
+# into StartBoundary (e.g. "2026-01-06T12:30:00-05:00"). That makes the trigger
+# an absolute instant rather than a local wall-clock time, so Get-ScheduledTaskInfo
+# reports NextRunTime an hour off across a DST boundary. Rewrite StartBoundary
+# without an offset so the task means "$TriggerTime local" all year.
+# ("s" is the sortable round-trip format: yyyy-MM-ddTHH:mm:ss, no offset suffix)
+$Trigger.StartBoundary = ([DateTime]$TriggerTime).ToString("s")
+
 # Define settings
+#
+# -WakeToRun: a sleeping machine otherwise sleeps straight through the trigger.
+#   On resume the clock jumps forward past the scheduled time, so the tick never
+#   happens and the week is silently skipped.
+# -RunOnlyIfNetworkAvailable is deliberately NOT set: the catch-up run from
+#   -StartWhenAvailable fires seconds after resume, before Wi-Fi reconnects, and
+#   the unmet condition skips the run entirely. Without it a network-less run
+#   fails loudly in the log (and gets retried below) instead of vanishing.
+# -RestartCount/-RestartInterval: retry a failed launch rather than waiting a week.
 $Settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -StartWhenAvailable `
-    -RunOnlyIfNetworkAvailable
+    -WakeToRun `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 10)
 
 # Define principal (run as current user)
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive

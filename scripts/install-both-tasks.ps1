@@ -28,6 +28,31 @@ if (-not (Test-Path $InstallScript)) {
 # concurrently and causes duplicate uploads/emails.
 $LegacyTaskName = "NAC-Service-Media-Weekly"
 
+# Task Scheduler history is disabled by default. Without it, a skipped run
+# (machine asleep, unmet launch condition) leaves no record anywhere -- no event
+# and no log file, since scheduled-task.ps1 never starts. Turn it on so missed
+# weeks are diagnosable after the fact. Requires elevation; non-fatal if refused.
+function Enable-TaskHistory {
+    $LogName = 'Microsoft-Windows-TaskScheduler/Operational'
+    try {
+        $State = wevtutil gl $LogName 2>$null | Select-String 'enabled:'
+        if ($State -and $State.ToString() -match 'true') {
+            Write-Host "Task Scheduler history already enabled"
+            return
+        }
+        wevtutil sl $LogName /e:true 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "wevtutil exited with $LASTEXITCODE"
+        }
+        Write-Host "Enabled Task Scheduler history"
+    }
+    catch {
+        Write-Host "NOTE: Could not enable Task Scheduler history: $_"
+        Write-Host "      Re-run this script as Administrator, or enable it manually in"
+        Write-Host "      taskschd.msc (right pane -> Enable All Tasks History)."
+    }
+}
+
 function Remove-LegacyTask {
     $existing = Get-ScheduledTask -TaskName $LegacyTaskName -ErrorAction SilentlyContinue
     if ($existing) {
@@ -76,6 +101,9 @@ $InstallArgs = @{
 # Remove legacy single-task installation if present (would fire alongside the
 # new Sunday task and cause duplicate runs).
 Remove-LegacyTask
+Write-Host ""
+
+Enable-TaskHistory
 Write-Host ""
 
 # Install Sunday task (12:30 PM)

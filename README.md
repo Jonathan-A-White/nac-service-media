@@ -267,6 +267,42 @@ make uninstall-scheduled-task
 
 Logs are written to `logs/scheduled-run-YYYY-MM-DD_HH-mm-ss.log`.
 
+### Troubleshooting a Missed Run
+
+A log file is only created once `scheduled-task.ps1` actually starts. If there is
+no log for an expected run, the task never launched — that is a Task Scheduler
+question, not an application one. From PowerShell:
+
+```powershell
+# Did it run? LastTaskResult 0 = success. NumberOfMissedRuns > 0 = skipped triggers.
+Get-ScheduledTaskInfo -TaskName "NAC-Service-Media-Weekly-Sunday" |
+  Select LastRunTime, LastTaskResult, NextRunTime, NumberOfMissedRuns
+
+# Why was it skipped? Event 332 names the unmet launch condition.
+Get-WinEvent -FilterHashtable @{
+  LogName='Microsoft-Windows-TaskScheduler/Operational'
+  StartTime=(Get-Date).Date
+} | Where-Object { $_.Message -match 'NAC-Service-Media' } |
+  Select-Object TimeCreated, Id, LevelDisplayName, Message | Format-List
+
+# Was the machine asleep through the trigger? A large forward "Time Delta" here
+# means the clock jumped over the scheduled time on resume.
+Get-WinEvent -FilterHashtable @{
+  LogName='System'; ProviderName='Microsoft-Windows-Kernel-General'; Id=1
+  StartTime=(Get-Date).AddDays(-14)
+} | Select-Object TimeCreated, Message | Format-List
+```
+
+To run a missed week by hand (this goes through the wrapper, so it produces a log):
+
+```powershell
+schtasks /run /tn "NAC-Service-Media-Weekly-Sunday"
+```
+
+Note that a run whose `.mp4` and `.mp3` are already on Drive exits early with
+`Most recent file (...) has already been processed` and sends no email — so a
+partial run that uploaded but failed before emailing cannot be retried this way.
+
 ## Development
 
 ### Running Tests
