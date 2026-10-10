@@ -336,6 +336,8 @@ nac-service-media/
     └── audio_templates/      # Amen template for end detection
 ```
 
+For what each package is responsible for, which files stories collide on, and proposed splits, see [docs/module-map.md](docs/module-map.md).
+
 ## License
 
 MIT
