@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -430,14 +431,41 @@ func crossSearchFailure(videoPath string, err error) error {
 	var miss *infradetection.CrossNotFoundError
 	if errors.As(err, &miss) && miss.FramesDir != "" {
 		return failWithHint("cross not found", fmt.Sprintf(
-			"the camera's shot may have changed. The frames it looked at are in %q, named by their time in the video. "+
+			"%s The frames it looked at are in %q, named by their time in the video. "+
 				"Find the first one with the cross lit and one just before it, then in WSL, in the nac-service-media folder, run "+
 				"'nac-service-media templates add --input %q --lit-at HH:MM:SS --unlit-at HH:MM:SS --name <shot>' with those two times "+
 				"(the shot's name is yours to choose, e.g. room). Then run the command below with --start replaced by the lit time, "+
 				"or without --start and --end to let it find them.",
-			miss.FramesDir, videoPath), err)
+			crossMissReading(miss), miss.FramesDir, videoPath), err)
 	}
 	return fail("cross not found", err)
+}
+
+// nearMissMargin is how far under the threshold a lit picture's best score
+// may be for the miss to read as "the shot is the same, the bar is too high".
+const nearMissMargin = 0.1
+
+// crossMissReading reads the miss's table of best scores: a lit picture that
+// came close to the threshold says the pictures still fit the shot; else the
+// shot may have changed.
+func crossMissReading(miss *infradetection.CrossNotFoundError) string {
+	for _, b := range miss.Best { // sorted by score, so the first lit picture is the best lit one
+		if !strings.HasSuffix(b.Name, "_lit") {
+			continue
+		}
+		if b.Score >= miss.Threshold-nearMissMargin {
+			return fmt.Sprintf("the %s picture came within %.2f of the threshold %.2f (it scored %.2f at %.2fx in the frame at %s), so the camera's shot has probably not changed: "+
+				"lowering detection.thresholds.match_score in config/config.yaml to %.2f may be enough, or teach it the shot afresh as below.",
+				b.Name, miss.Threshold-b.Score, miss.Threshold, b.Score, b.Scale, secondsToTimestamp(b.Seconds), math.Round((b.Score-0.05)*20)/20)
+		}
+		break
+	}
+	return "the camera's shot may have changed."
+}
+
+// secondsToTimestamp writes a time in the video as HH:MM:SS.
+func secondsToTimestamp(seconds int) string {
+	return fmt.Sprintf("%02d:%02d:%02d", seconds/3600, (seconds%3600)/60, seconds%60)
 }
 
 // notifyFailure is the one failure notifier of the process command: it sends

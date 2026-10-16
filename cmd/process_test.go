@@ -419,3 +419,65 @@ func TestProcess_CrossMiss_EmailNamesTheSampledFramesAndTemplatesAdd(t *testing.
 		}
 	}
 }
+
+// AC3: the failure email says, per picture of the cross, the best it scored,
+// at which scale and in which frame, and the threshold, so a miss can be
+// understood from the email alone.
+func TestProcess_CrossMiss_EmailSaysWhatEachTemplateScored(t *testing.T) {
+	var out bytes.Buffer
+	mailer := &fakeMailer{}
+	run := newTestRun(&out, mailer)
+	run.detectStart = func(ctx context.Context, videoPath string) (string, error) {
+		miss := &infradetection.CrossNotFoundError{
+			Analysed:  62,
+			Threshold: 0.75,
+			Best: []infradetection.TemplateBest{
+				{Name: "wide_unlit", Score: 0.71, Scale: 1, Seconds: 720},
+				{Name: "wide_lit", Score: 0.70, Scale: 1.09, Seconds: 870},
+				{Name: "closeup_lit", Score: 0.55, Scale: 0.5, Seconds: 5},
+			},
+		}
+		return "", fmt.Errorf("auto-detection failed: %w\nUse --start to specify manually", miss)
+	}
+
+	err := run.run(context.Background())
+
+	if err == nil {
+		t.Fatal("the run should fail")
+	}
+	if len(mailer.plain) != 1 {
+		t.Fatalf("expected exactly one failure email, got %d", len(mailer.plain))
+	}
+	body := mailer.plain[0].body
+	for _, want := range []string{
+		"  The best each picture of the cross scored (a frame shows the cross from 0.75):",
+		"    wide_unlit   0.71 at 1.00x in the frame at 00:12:00",
+		"    wide_lit     0.70 at 1.09x in the frame at 00:14:30",
+		"    closeup_lit  0.55 at 0.50x in the frame at 00:00:05",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("failure email body missing %q\nbody:\n%s", want, body)
+		}
+	}
+}
+
+func TestCrossMissReading(t *testing.T) {
+	miss := &infradetection.CrossNotFoundError{Threshold: 0.75, FramesDir: "/frames", Best: []infradetection.TemplateBest{
+		{Name: "wide_unlit", Score: 0.71, Scale: 1, Seconds: 720},
+		{Name: "wide_lit", Score: 0.70, Scale: 1.09, Seconds: 870},
+	}}
+	got := crossMissReading(miss)
+	want := "the wide_lit picture came within 0.05 of the threshold 0.75 (it scored 0.70 at 1.09x in the frame at 00:14:30), so the camera's shot has probably not changed: " +
+		"lowering detection.thresholds.match_score in config/config.yaml to 0.65 may be enough, or teach it the shot afresh as below."
+	if got != want {
+		t.Errorf("near miss:\n got %q\nwant %q", got, want)
+	}
+
+	miss.Best = []infradetection.TemplateBest{{Name: "wide_unlit", Score: 0.71, Scale: 1, Seconds: 720}, {Name: "wide_lit", Score: 0.5, Scale: 1, Seconds: 870}}
+	if got := crossMissReading(miss); got != "the camera's shot may have changed." {
+		t.Errorf("far miss: got %q", got)
+	}
+	if got := crossMissReading(&infradetection.CrossNotFoundError{Threshold: 0.75}); got != "the camera's shot may have changed." {
+		t.Errorf("no table: got %q", got)
+	}
+}
