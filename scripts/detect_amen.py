@@ -6,13 +6,16 @@ This script is called by the Go application to perform audio template matching
 for detecting the end of a church service.
 
 Usage:
-    python3 detect_amen.py <video_path> [start_offset_minutes] [search_duration_minutes] [template_dir]
+    python3 detect_amen.py <video_path> [start_offset_minutes] [search_duration_minutes] [template_dir] [service_start_seconds]
 
 Arguments:
     video_path              Path to the video file to analyze
     start_offset_minutes    Minutes from video start to begin searching (default: 20)
     search_duration_minutes Duration in minutes to search (default: 90)
     template_dir            Directory containing amen_chroma.npy (default: config/audio_templates)
+    service_start_seconds   When the cross lit up, in seconds (default: 0). Only used when the
+                            video ends before the start offset: the search then covers the last
+                            part of the video, never earlier than this plus MIN_SERVICE_SEC.
 
 Output (JSON to stdout):
     {"detected": true, "amen_end": "01:15:20", "amen_end_seconds": 4520, "confidence": 0.85}
@@ -66,6 +69,40 @@ def check_dependencies():
             "error": f"Missing Python packages: {', '.join(missing)}. Install with: pip install {' '.join(missing)}"
         }
     return None
+
+
+# The shortest service we will search for an amen in: the amen cannot end
+# sooner than this after the cross lights up.
+MIN_SERVICE_SEC = 10 * 60
+
+# A window after the start offset shorter than this is not worth searching on
+# its own; the search takes the last part of the video instead.
+MIN_USEFUL_WINDOW_SEC = 10 * 60
+
+
+def amen_search_window(video_duration, start_offset_sec, search_duration_sec,
+                       service_start_sec=0, min_window_sec=0):
+    """
+    Work out which part of the video to search for the amen.
+
+    Normally that is from start_offset_sec for search_duration_sec. When the
+    video ends before the offset (or leaves less than MIN_USEFUL_WINDOW_SEC after
+    it), the service was shorter than expected, so search the last part of the
+    video instead: from max(service start + MIN_SERVICE_SEC, duration - search
+    duration) to the end.
+
+    Returns (start_sec, duration_sec), or None when the video has no window of at
+    least min_window_sec for the amen after the earliest it could end.
+    """
+    left = video_duration - start_offset_sec
+    if left >= max(MIN_USEFUL_WINDOW_SEC, min_window_sec):
+        return start_offset_sec, min(search_duration_sec, left)
+
+    start = max(service_start_sec + MIN_SERVICE_SEC, video_duration - search_duration_sec, 0)
+    duration = min(search_duration_sec, video_duration - start)
+    if duration <= 0 or duration < min_window_sec:
+        return None
+    return start, duration
 
 
 def seconds_to_timestamp(secs: float) -> str:
@@ -137,7 +174,8 @@ def match_template_chroma(template_chroma, search_chroma):
     return best_idx, best_score
 
 
-def find_amen(video_path: str, start_offset_minutes: int, search_duration_minutes: int, template_dir: str, min_confidence: float = 0.50):
+def find_amen(video_path: str, start_offset_minutes: int, search_duration_minutes: int, template_dir: str,
+              min_confidence: float = 0.50, service_start_seconds: int = 0):
     """
     Search for the three-fold amen in a video.
 
@@ -149,6 +187,7 @@ def find_amen(video_path: str, start_offset_minutes: int, search_duration_minute
         search_duration_minutes: Duration in minutes to search
         template_dir: Directory containing amen_chroma.npy
         min_confidence: Minimum confidence threshold for detection
+        service_start_seconds: When the cross lit up; bounds the search when the video is short
 
     Returns:
         dict with detection result
@@ -172,15 +211,18 @@ def find_amen(video_path: str, start_offset_minutes: int, search_duration_minute
             "error": f"Failed to get video duration: {e}"
         }
 
-    # Search from start_offset for search_duration minutes
-    search_start = start_offset_minutes * 60
-    search_duration = min(search_duration_minutes * 60, video_duration - search_start)
-
-    if search_duration <= 0:
+    # Search from start_offset for search_duration minutes; a video that ends
+    # before the offset is searched from its last part instead
+    template_len = template_chroma.shape[1] * 512 / 22050
+    window = amen_search_window(video_duration, start_offset_minutes * 60, search_duration_minutes * 60,
+                                service_start_seconds, template_len)
+    if window is None:
         return {
             "detected": False,
-            "error": f"Video too short: {video_duration:.0f}s, need at least {search_start}s"
+            "error": (f"Video too short: {video_duration:.0f}s, the service started at "
+                      f"{service_start_seconds}s and the amen cannot end before {service_start_seconds + MIN_SERVICE_SEC}s")
         }
+    search_start, search_duration = window
 
     # Extract audio to temp file
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -239,7 +281,7 @@ def main():
     if len(sys.argv) < 2:
         result = {
             "detected": False,
-            "error": "Usage: detect_amen.py <video_path> [start_offset_minutes] [search_duration_minutes] [template_dir]"
+            "error": "Usage: detect_amen.py <video_path> [start_offset_minutes] [search_duration_minutes] [template_dir] [service_start_seconds]"
         }
         print(json.dumps(result))
         sys.exit(1)
@@ -262,6 +304,8 @@ def main():
         script_dir = Path(__file__).parent.parent
         template_dir = str(script_dir / "config" / "audio_templates")
 
+    service_start_seconds = int(sys.argv[5]) if len(sys.argv) > 5 else 0
+
     # Check video exists
     if not os.path.exists(video_path):
         result = {
@@ -272,7 +316,8 @@ def main():
         sys.exit(1)
 
     # Run detection
-    result = find_amen(video_path, start_offset_minutes, search_duration_minutes, template_dir)
+    result = find_amen(video_path, start_offset_minutes, search_duration_minutes, template_dir,
+                       service_start_seconds=service_start_seconds)
     print(json.dumps(result))
 
 

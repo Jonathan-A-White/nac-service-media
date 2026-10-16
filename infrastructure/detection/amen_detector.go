@@ -96,12 +96,14 @@ func (d *AmenDetector) DetectEnd(ctx context.Context, videoPath string, serviceS
 	// e.g., if service starts at 24:05 (1445s) and offset is 20 min, search from 44:05
 	actualStartOffsetMinutes := (serviceStartSeconds / 60) + d.startOffsetMinutes
 
-	// Build command: detect_amen.py <video_path> <start_offset_minutes> <search_duration_minutes> <template_dir>
+	// Build command: detect_amen.py <video_path> <start_offset_minutes> <search_duration_minutes> <template_dir> <service_start_seconds>
+	// The script searches the last part of the video when it ends before the offset, and needs the service start for that.
 	cmd := exec.CommandContext(ctx, "python3", scriptPath,
 		videoPath,
 		fmt.Sprintf("%d", actualStartOffsetMinutes),
 		fmt.Sprintf("%d", d.searchDurationMinutes),
 		d.templateDir,
+		fmt.Sprintf("%d", serviceStartSeconds),
 	)
 
 	output, err := cmd.Output()
