@@ -33,6 +33,7 @@ type Client struct {
 	gmailService GmailService
 	from         notification.Recipient
 	template     notification.EmailTemplate
+	authTimeout  time.Duration // bounds the browser sign-in wait; zero waits for ctx
 }
 
 // ClientOption is a functional option for configuring Client

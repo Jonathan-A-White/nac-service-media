@@ -94,6 +94,7 @@ func (s *GoogleDriveService) CreatePermission(ctx context.Context, fileID string
 // Client implements distribution.DriveClient using Google Drive API
 type Client struct {
 	driveService DriveService
+	authTimeout  time.Duration // bounds the browser sign-in wait; zero waits for ctx
 }
 
 // ClientOption is a functional option for configuring Client
