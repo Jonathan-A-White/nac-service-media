@@ -212,6 +212,44 @@ The detection uses a 3-phase algorithm:
 
 Typical accuracy: within 1 second of actual timestamp.
 
+Each camera shot is a pair of pictures in the templates folder,
+`<shot>_lit.png` and `<shot>_unlit.png`; every pair there is used. A frame
+counts as showing a shot when its match score reaches
+`detection.thresholds.match_score` (default 0.85); whether the cross is lit is
+then decided by which of the shot's two pictures is nearer in brightness.
+
+### When the cross is not found
+
+The usual cause is that the camera's shot changed, so no saved picture of the
+cross matches. A failed run's email says so, and names a folder beside the
+video (`<video name> cross frames`) holding the frames it looked at, one every
+30 seconds, named by their time in the video (`00-14-30.jpg`). Find the first
+one with the cross lit and one just before it. To look at any other moment:
+
+```bash
+nac-service-media templates frame --input "2026-10-11 10-17-09.mp4" --at 00:14:07 --out cross.png
+```
+
+Then teach it the new shot from a time with the cross off and a time with it
+on (a second or two apart is best):
+
+```bash
+nac-service-media templates add --input "2026-10-11 10-17-09.mp4" \
+  --unlit-at 00:14:06 --lit-at 00:14:07 --name room
+```
+
+It finds the cross as the part of the picture that brightens most, prints the
+box it chose and writes `room_lit.png` and `room_unlit.png` into the templates
+folder. Look at the two pictures; if the box is wrong, give it yourself with
+`--region x,y,w,h` (pixels of the full frame, as in the frame PNG) and
+`--force` to replace the shot. Then run `process` again: it finds the cross by
+itself.
+
+A run that could not look at the video at all (no frame could be read, no
+templates, detection not built in) says "cross search could not run" instead,
+and an amen search that could not run (for example, the video is too short)
+says "amen search could not run".
+
 ### End Detection (Audio)
 
 When `--end` is omitted, the tool automatically detects the end of the three-fold amen song using audio template matching. This requires:
