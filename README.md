@@ -23,10 +23,8 @@ sudo apt-get install -y golang-go
 # Install ffmpeg for video processing
 sudo apt-get install -y ffmpeg
 
-# Install OpenCV for start auto-detection (optional but recommended)
-sudo apt-get install -y libopencv-dev libopencv-contrib-dev build-essential
-
-# Install Python for end auto-detection (optional but recommended)
+# Install Python for end auto-detection (optional but recommended).
+# Start auto-detection (the cross) needs only ffmpeg: no OpenCV.
 sudo apt-get install -y python3 python3-pip
 pip3 install librosa numpy scipy
 ```
@@ -40,10 +38,10 @@ cd ~/src/nac
 git clone https://github.com/Jonathan-A-White/nac-service-media.git
 cd nac-service-media
 
-# Build with auto-detection enabled (requires OpenCV)
+# Build with end auto-detection enabled (requires Python with librosa)
 go build -tags=detection
 
-# Or build without auto-detection (no OpenCV required)
+# Or build without end auto-detection (start auto-detection is always in)
 go build
 ```
 
@@ -170,7 +168,7 @@ detection:
   enabled: true
   templates_dir: config/detection_templates
   thresholds:
-    match_score: 0.85
+    match_score: 0.75
     coarse_step_seconds: 30
   search_range:
     start_minutes: 10
@@ -200,10 +198,9 @@ detection:
 
 When `--start` is omitted, the tool automatically detects when the cross lights up using template matching. This requires:
 
-1. OpenCV installed (`libopencv-dev libopencv-contrib-dev`)
-2. Build with `-tags=detection`
-3. `detection.enabled: true` in config
-4. Template images in `config/detection_templates/`
+1. ffmpeg (the frames come out of the video with it; no OpenCV, no build tag)
+2. `detection.enabled: true` in config
+3. Template images in `config/detection_templates/`
 
 The detection uses a 3-phase algorithm:
 1. **Coarse scan**: Check every 30 seconds
@@ -213,18 +210,47 @@ The detection uses a 3-phase algorithm:
 Typical accuracy: within 1 second of actual timestamp.
 
 Each camera shot is a pair of pictures in the templates folder,
-`<shot>_lit.png` and `<shot>_unlit.png`; every pair there is used. A frame
-counts as showing a shot when its match score reaches
-`detection.thresholds.match_score` (default 0.85); whether the cross is lit is
-then decided by which of the shot's two pictures is nearer in brightness.
+`<shot>_lit.png` and `<shot>_unlit.png`; every pair there is used. Each
+picture is tried at every scale from half its size to double, in steps of
+about 9%, so the camera may zoom in or out by up to 2x from the shot the
+picture was taken from. A frame counts as showing a shot when some picture's
+match score reaches `detection.thresholds.match_score` (default 0.75: a
+screenshot of the 10/11/2026 service scored 0.83 with the `wide` picture at
+its own size, under the old 0.85, so a run that missed from 09/13 on most
+likely saw the cross just under that line). Whether the cross is lit is then
+decided by how much brighter the cross is than the wall around it, set between
+the shot's unlit and lit pictures, together with which of the two pictures
+fits better.
+
+The log has one line per frame looked at, so a run can be read back:
+
+```
+  00:14:00  unlit  wide 1.00x score 0.81 (cross 12% lit)
+  00:14:30  lit    wide 1.00x score 0.84 (cross 96% lit)
+  00:00:05  not in view  best wide_lit 0.61 at 0.92x (threshold 0.75)
+Detected start: 00:14:07 (wide shot at 1.00x, score 0.84)
+```
 
 ### When the cross is not found
 
-The usual cause is that the camera's shot changed, so no saved picture of the
-cross matches. A failed run's email says so, and names a folder beside the
-video (`<video name> cross frames`) holding the frames it looked at, one every
-30 seconds, named by their time in the video (`00-14-30.jpg`). Find the first
-one with the cross lit and one just before it. To look at any other moment:
+A failed run's email says, for each picture of the cross, the best it scored
+over the whole search, at which scale and in which frame, and the threshold:
+
+```
+The best each picture of the cross scored (a frame shows the cross from 0.75):
+  wide_lit     0.70 at 1.00x in the frame at 00:14:30
+  wide_unlit   0.66 at 1.00x in the frame at 00:12:00
+  closeup_lit  0.55 at 0.50x in the frame at 00:00:05
+```
+
+Read it like this: a lit picture scoring just under the threshold at a sensible
+scale, in a frame where the cross was on, means the pictures still fit and
+`match_score` is a little too high; every picture far under it means the
+camera's shot changed, so no saved picture of the cross matches. The email also
+names a folder beside the video (`<video name> cross frames`) holding the
+frames it looked at, one every 30 seconds, named by their time in the video
+(`00-14-30.jpg`). Find the first one with the cross lit and one just before
+it. To look at any other moment:
 
 ```bash
 nac-service-media templates frame --input "2026-10-11 10-17-09.mp4" --at 00:14:07 --out cross.png
@@ -376,7 +402,7 @@ nac-service-media/
 │   ├── ffmpeg/           # ffmpeg wrapper
 │   ├── drive/            # Google Drive client
 │   ├── gmail/            # Gmail client
-│   └── detection/        # GoCV template matching
+│   └── detection/        # Cross template matching (Go, FFT) and the amen wrapper
 ├── features/              # BDD tests (godog)
 ├── scripts/               # Helper scripts (Python detection)
 └── config/
