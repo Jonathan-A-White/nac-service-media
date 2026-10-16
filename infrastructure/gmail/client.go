@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"mime"
 	"strings"
 	"time"
 
@@ -126,27 +127,11 @@ func (c *Client) buildMIMEMessage(req *notification.EmailRequest, subject, plain
 	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", c.from.Name, c.from.Address))
 
 	// To recipients
-	toAddrs := make([]string, len(req.To))
-	for i, to := range req.To {
-		if to.Name != "" {
-			toAddrs[i] = fmt.Sprintf("%s <%s>", to.Name, to.Address)
-		} else {
-			toAddrs[i] = to.Address
-		}
-	}
-	msg.WriteString(fmt.Sprintf("To: %s\r\n", strings.Join(toAddrs, ", ")))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", formatAddressList(req.To)))
 
 	// CC recipients
 	if len(req.CC) > 0 {
-		ccAddrs := make([]string, len(req.CC))
-		for i, cc := range req.CC {
-			if cc.Name != "" {
-				ccAddrs[i] = fmt.Sprintf("%s <%s>", cc.Name, cc.Address)
-			} else {
-				ccAddrs[i] = cc.Address
-			}
-		}
-		msg.WriteString(fmt.Sprintf("Cc: %s\r\n", strings.Join(ccAddrs, ", ")))
+		msg.WriteString(fmt.Sprintf("Cc: %s\r\n", formatAddressList(req.CC)))
 	}
 
 	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
@@ -168,6 +153,44 @@ func (c *Client) buildMIMEMessage(req *notification.EmailRequest, subject, plain
 	msg.WriteString("--boundary42--\r\n")
 
 	return msg.String()
+}
+
+// SendPlain sends a plain-text email with the given subject and body, such as
+// the notice that a process run failed.
+func (c *Client) SendPlain(to []notification.Recipient, subject, body string) error {
+	if len(to) == 0 {
+		return notification.ErrNoRecipients
+	}
+
+	var msg strings.Builder
+	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", c.from.Name, c.from.Address))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", formatAddressList(to)))
+	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", mime.QEncoding.Encode("UTF-8", subject)))
+	msg.WriteString("MIME-Version: 1.0\r\n")
+	msg.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n\r\n")
+	msg.WriteString(strings.ReplaceAll(body, "\n", "\r\n"))
+	msg.WriteString("\r\n")
+
+	message := &gmail.Message{
+		Raw: base64.URLEncoding.EncodeToString([]byte(msg.String())),
+	}
+	if _, err := c.gmailService.SendMessage(context.Background(), "me", message); err != nil {
+		return fmt.Errorf("%w: %v", notification.ErrSendFailed, err)
+	}
+	return nil
+}
+
+// formatAddressList formats recipients for a To or Cc header
+func formatAddressList(recipients []notification.Recipient) string {
+	addrs := make([]string, len(recipients))
+	for i, r := range recipients {
+		if r.Name != "" {
+			addrs[i] = fmt.Sprintf("%s <%s>", r.Name, r.Address)
+		} else {
+			addrs[i] = r.Address
+		}
+	}
+	return strings.Join(addrs, ", ")
 }
 
 // Ensure Client implements notification.EmailSender

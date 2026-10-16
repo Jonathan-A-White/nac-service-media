@@ -3,6 +3,7 @@ package gmail
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -144,4 +145,55 @@ func TestClient_Send_ValidationError(t *testing.T) {
 // decodeBase64URL decodes a base64 URL encoded string
 func decodeBase64URL(s string) ([]byte, error) {
 	return base64.URLEncoding.DecodeString(s)
+}
+
+func TestClient_SendPlain(t *testing.T) {
+	mock := &mockGmailService{}
+	from := notification.Recipient{Name: "Jonathan White", Address: "whiteplainsnac@gmail.com"}
+	client := NewClient(from, WithGmailService(mock))
+
+	to := []notification.Recipient{{Name: "Jane Doe", Address: "jane@example.com"}}
+	err := client.SendPlain(to, "Service recording NOT processed: 2026-10-11: cross not found", "What failed: cross not found\nVideo file: x.mp4")
+	if err != nil {
+		t.Fatalf("SendPlain() error = %v", err)
+	}
+	if len(mock.sentMessages) != 1 {
+		t.Fatalf("expected 1 message sent, got %d", len(mock.sentMessages))
+	}
+	raw, err := decodeBase64URL(mock.sentMessages[0].Raw)
+	if err != nil {
+		t.Fatalf("failed to decode message: %v", err)
+	}
+	msg := string(raw)
+	for _, want := range []string{
+		"From: Jonathan White <whiteplainsnac@gmail.com>\r\n",
+		"To: Jane Doe <jane@example.com>\r\n",
+		"Subject: Service recording NOT processed: 2026-10-11: cross not found\r\n",
+		"Content-Type: text/plain; charset=\"UTF-8\"",
+		"What failed: cross not found\r\nVideo file: x.mp4",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message missing %q\n%s", want, msg)
+		}
+	}
+}
+
+func TestClient_SendPlain_NoRecipients(t *testing.T) {
+	mock := &mockGmailService{}
+	client := NewClient(notification.Recipient{Address: "a@example.com"}, WithGmailService(mock))
+	if err := client.SendPlain(nil, "s", "b"); err != notification.ErrNoRecipients {
+		t.Errorf("expected ErrNoRecipients, got %v", err)
+	}
+	if len(mock.sentMessages) != 0 {
+		t.Error("nothing should be sent without recipients")
+	}
+}
+
+func TestClient_SendPlain_SendFails(t *testing.T) {
+	mock := &mockGmailService{shouldFail: true, failError: errors.New("token expired")}
+	client := NewClient(notification.Recipient{Address: "a@example.com"}, WithGmailService(mock))
+	err := client.SendPlain([]notification.Recipient{{Address: "j@example.com"}}, "s", "b")
+	if !errors.Is(err, notification.ErrSendFailed) {
+		t.Errorf("expected ErrSendFailed, got %v", err)
+	}
 }
