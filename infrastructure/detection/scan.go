@@ -35,7 +35,8 @@ type CrossNotFoundError struct {
 
 	FramesDir  string // where the sampled frames were left; empty when none
 	FramesKept int
-	KeepErrors int // sampled frames that could not be saved
+	KeepErrors int   // sampled frames that could not be saved
+	KeepErr    error // the last of those errors
 }
 
 func (e *CrossNotFoundError) Error() string {
@@ -50,7 +51,7 @@ func (e *CrossNotFoundError) Error() string {
 		fmt.Fprintf(&b, "; the %d frames it sampled are in %q, named by their time in the video", e.FramesKept, e.FramesDir)
 	}
 	if e.KeepErrors > 0 {
-		fmt.Fprintf(&b, "; %d sampled frames could not be saved", e.KeepErrors)
+		fmt.Fprintf(&b, "; %d sampled frames could not be saved, the last: %v", e.KeepErrors, e.KeepErr)
 	}
 	return b.String()
 }
@@ -119,9 +120,12 @@ func (s crossScan) run(ctx context.Context, videoPath string) (detection.Detecti
 	result, err := s.search(ctx, look, &tally)
 	if err != nil {
 		var miss *CrossNotFoundError
-		if errors.As(err, &miss) && samples.kept > 0 {
-			miss.FramesDir, miss.FramesKept, miss.KeepErrors = samples.dir, samples.kept, samples.failed
-			return result, err
+		if errors.As(err, &miss) {
+			miss.KeepErrors, miss.KeepErr = samples.failed, samples.lastErr
+			if samples.kept > 0 {
+				miss.FramesDir, miss.FramesKept = samples.dir, samples.kept
+				return result, err
+			}
 		}
 		samples.discard()
 		return result, err

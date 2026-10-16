@@ -330,3 +330,24 @@ func TestClassifyMatches_BelowTheThresholdIsNotVisible(t *testing.T) {
 		t.Errorf("got %+v, want not visible", got)
 	}
 }
+
+func TestCrossScan_MissSaysWhenNoSampledFrameCouldBeSaved(t *testing.T) {
+	fa := &fakeAnalyzer{dir: t.TempDir(), state: func(int) detection.FrameState { return detection.StateNotVisible }}
+	blocker := filepath.Join(t.TempDir(), "a file")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := newCrossScan(scanConfig(), fa.analyze, filepath.Join(blocker, "frames")).run(context.Background(), "v.mp4")
+
+	var miss *CrossNotFoundError
+	if !errors.As(err, &miss) {
+		t.Fatalf("want a *CrossNotFoundError, got %v", err)
+	}
+	if miss.FramesDir != "" {
+		t.Errorf("FramesDir = %q, want none: no frame was saved", miss.FramesDir)
+	}
+	if !strings.Contains(err.Error(), "22 sampled frames could not be saved") || !strings.Contains(err.Error(), blocker) {
+		t.Errorf("error %q should count the frames that could not be saved and say why", err)
+	}
+}
