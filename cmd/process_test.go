@@ -14,6 +14,7 @@ import (
 	"nac-service-media/domain/distribution"
 	"nac-service-media/domain/notification"
 	"nac-service-media/infrastructure/config"
+	infradetection "nac-service-media/infrastructure/detection"
 	"nac-service-media/infrastructure/lock"
 )
 
@@ -374,5 +375,74 @@ func TestBrowserAuthTimeout_BoundedWhenNotATerminal(t *testing.T) {
 	defer f.Close()
 	if got := browserAuthTimeout(f, f); got != browserAuthWait {
 		t.Errorf("a run writing to a file (the scheduled task's log) should bound the sign-in wait; got %s", got)
+	}
+}
+
+func TestProcess_CrossMiss_EmailNamesTheSampledFramesAndTemplatesAdd(t *testing.T) {
+	var out bytes.Buffer
+	mailer := &fakeMailer{}
+	run := newTestRun(&out, mailer)
+	framesDir := "/test/source/2026-10-11 10-17-09 cross frames"
+	run.detectStart = func(ctx context.Context, videoPath string) (string, error) {
+		miss := &infradetection.CrossNotFoundError{Analysed: 62, FramesDir: framesDir, FramesKept: 62}
+		return "", fmt.Errorf("auto-detection failed: %w\nUse --start to specify manually", miss)
+	}
+
+	err := run.run(context.Background())
+
+	if err == nil || !strings.Contains(err.Error(), framesDir) {
+		t.Fatalf("the run's error should name the frames folder, got %v", err)
+	}
+	if len(mailer.plain) != 1 {
+		t.Fatalf("expected exactly one failure email, got %d", len(mailer.plain))
+	}
+	mail := mailer.plain[0]
+	if !strings.HasSuffix(mail.subject, ": cross not found") {
+		t.Errorf("subject = %q, want it to end with 'cross not found'", mail.subject)
+	}
+	for _, want := range []string{
+		framesDir,
+		`nac-service-media templates add --input "` + sundayVideo + `" --lit-at HH:MM:SS --unlit-at HH:MM:SS --name`,
+	} {
+		if !strings.Contains(mail.body, want) {
+			t.Errorf("failure email body missing %q\nbody:\n%s", want, mail.body)
+		}
+	}
+}
+
+func TestProcess_SearchesThatAnalysedNothingDoNotReadAsNotFound(t *testing.T) {
+	cases := []struct {
+		name   string
+		break_ func(r *processRun)
+		reason string
+	}{
+		{"cross search read no frame", func(r *processRun) {
+			r.detectStart = func(context.Context, string) (string, error) {
+				return "", fmt.Errorf("auto-detection failed: %w", fmt.Errorf("could not read any of the 22 frames it tried: %w", infradetection.ErrNothingAnalysed))
+			}
+		}, "cross search could not run"},
+		{"amen search could not run", func(r *processRun) {
+			r.detectEnd = func(context.Context, string, int) (string, error) {
+				return "", fmt.Errorf("end detection failed: %w", fmt.Errorf("amen search could not run: Video too short (%w)", infradetection.ErrNothingAnalysed))
+			}
+		}, "amen search could not run"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			mailer := &fakeMailer{}
+			run := newTestRun(&out, mailer)
+			tc.break_(run)
+
+			if err := run.run(context.Background()); err == nil {
+				t.Fatal("expected the run to fail")
+			}
+			if len(mailer.plain) != 1 {
+				t.Fatalf("expected exactly one failure email, got %d", len(mailer.plain))
+			}
+			if !strings.HasSuffix(mailer.plain[0].subject, ": "+tc.reason) {
+				t.Errorf("subject %q should end with %q", mailer.plain[0].subject, tc.reason)
+			}
+		})
 	}
 }

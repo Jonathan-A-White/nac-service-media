@@ -19,6 +19,7 @@ import (
 	"nac-service-media/domain/notification"
 	"nac-service-media/domain/video"
 	"nac-service-media/infrastructure/config"
+	infradetection "nac-service-media/infrastructure/detection"
 	"nac-service-media/infrastructure/drive"
 	"nac-service-media/infrastructure/ffmpeg"
 	"nac-service-media/infrastructure/filesystem"
@@ -372,7 +373,7 @@ func (r *processRun) execute(ctx context.Context) error {
 		// Run detection
 		detectedTime, err := r.detectStart(ctx, videoPath)
 		if err != nil {
-			return fail("cross not found", err)
+			return crossSearchFailure(videoPath, err)
 		}
 		r.startTime = detectedTime
 	}
@@ -395,6 +396,9 @@ func (r *processRun) execute(ctx context.Context) error {
 		// Run detection, searching from (startTime + offset) minutes into video
 		detectedTime, err := r.detectEnd(ctx, videoPath, startTimestamp.TotalSeconds())
 		if err != nil {
+			if errors.Is(err, infradetection.ErrNothingAnalysed) {
+				return fail("amen search could not run", err)
+			}
 			return fail("amen not found", err)
 		}
 		r.endTime = detectedTime
@@ -414,6 +418,26 @@ func (r *processRun) execute(ctx context.Context) error {
 	input.StartTime = r.startTime
 	input.EndTime = r.endTime
 	return r.workflow(ctx, driveClient, gmailClient, input)
+}
+
+// crossSearchFailure names a failed cross search: one that could not look at
+// the video is not "cross not found"; a miss that left its sampled frames
+// says where they are and how to teach the detector the shot.
+func crossSearchFailure(videoPath string, err error) error {
+	if errors.Is(err, infradetection.ErrNothingAnalysed) {
+		return fail("cross search could not run", err)
+	}
+	var miss *infradetection.CrossNotFoundError
+	if errors.As(err, &miss) && miss.FramesDir != "" {
+		return failWithHint("cross not found", fmt.Sprintf(
+			"the camera's shot may have changed. The frames it looked at are in %q, named by their time in the video. "+
+				"Find the first one with the cross lit and one just before it, then in WSL, in the nac-service-media folder, run "+
+				"'nac-service-media templates add --input %q --lit-at HH:MM:SS --unlit-at HH:MM:SS --name <shot>' with those two times "+
+				"(the shot's name is yours to choose, e.g. room). Then run the command below with --start replaced by the lit time, "+
+				"or without --start and --end to let it find them.",
+			miss.FramesDir, videoPath), err)
+	}
+	return fail("cross not found", err)
 }
 
 // notifyFailure is the one failure notifier of the process command: it sends
