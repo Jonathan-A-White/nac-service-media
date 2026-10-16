@@ -299,9 +299,20 @@ To run a missed week by hand (this goes through the wrapper, so it produces a lo
 schtasks /run /tn "NAC-Service-Media-Weekly-Sunday"
 ```
 
-Note that a run whose `.mp4` and `.mp3` are already on Drive exits early with
-`Most recent file (...) has already been processed` and sends no email — so a
-partial run that uploaded but failed before emailing cannot be retried this way.
+Note that a run whose `.mp4` and `.mp3` are already on Drive exits early (exit
+code 0) with `Most recent file (...) has already been processed` and sends no
+email — so a partial run that uploaded but failed before emailing cannot be
+retried this way.
+
+When a run fails (cross or amen not found, Google sign-in, upload, ffmpeg, ...)
+it sends one email to its `--recipient` titled `Service recording NOT processed:
+<date>: <reason>`, with the details, the video it used, the last 30 log lines
+and the exact `nac-service-media process --input ...` command to finish it by
+hand, and exits 1. If that email cannot be sent either, the log says
+`FAILURE EMAIL NOT SENT`. A run that finds another run still holding the lock
+also exits 1 and emails. In a scheduled run (nobody at the terminal) a Google
+sign-in that needs the browser gives up after two minutes; fix it with
+`nac-service-media auth status --fix`.
 
 ## Development
 
