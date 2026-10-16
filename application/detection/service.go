@@ -42,7 +42,7 @@ func (s *Service) DetectStart(ctx context.Context, input DetectInput) (*DetectRe
 	fmt.Fprintf(s.output, "Analyzing video for service start...\n")
 
 	// Create detector
-	detector := infradetection.NewTemplateDetector(s.config)
+	detector := infradetection.NewTemplateDetector(s.config, infradetection.WithOutput(s.output))
 
 	// Load templates
 	fmt.Fprintf(s.output, "  Loading templates...\n")
@@ -63,10 +63,8 @@ func (s *Service) DetectStart(ctx context.Context, input DetectInput) (*DetectRe
 		return nil, err
 	}
 
-	fmt.Fprintf(s.output, "  Phase 2: Binary search...\n")
-	fmt.Fprintf(s.output, "  Phase 3: Refining...\n")
-	fmt.Fprintf(s.output, "Detected start: %s (%s angle, confidence: %.0f%%)\n",
-		result.Timestamp.String(), result.CameraAngle, result.Confidence*100)
+	fmt.Fprintf(s.output, "Detected start: %s (%s shot at %.2fx, score %.2f)\n",
+		result.Timestamp.String(), result.CameraAngle, result.Scale, result.Confidence)
 
 	return &DetectResult{
 		Timestamp:      result.Timestamp.String(),

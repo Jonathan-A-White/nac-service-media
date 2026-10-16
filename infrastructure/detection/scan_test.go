@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -26,20 +27,20 @@ type fakeAnalyzer struct {
 	asked      []int
 }
 
-func (f *fakeAnalyzer) analyze(ctx context.Context, videoPath string, seconds int, keep func(framePath string)) (detection.FrameAnalysis, error) {
+func (f *fakeAnalyzer) analyze(ctx context.Context, videoPath string, seconds int, keep func(framePath string)) (frameReport, error) {
 	f.asked = append(f.asked, seconds)
 	if f.unreadable != nil && f.unreadable(seconds) {
-		return detection.FrameAnalysis{}, fmt.Errorf("failed to extract frame at %d", seconds)
+		return frameReport{}, fmt.Errorf("failed to extract frame at %d", seconds)
 	}
 	if keep != nil {
 		path := filepath.Join(f.dir, fmt.Sprintf("frame_%d.png", seconds))
 		if err := writePNGFile(path, image.NewGray(image.Rect(0, 0, 8, 6))); err != nil {
-			return detection.FrameAnalysis{}, err
+			return frameReport{}, err
 		}
 		keep(path)
 		os.Remove(path)
 	}
-	return detection.FrameAnalysis{State: f.state(seconds), CameraAngle: "room", Confidence: 0.9, TimestampSeconds: seconds}, nil
+	return frameReport{FrameAnalysis: detection.FrameAnalysis{State: f.state(seconds), CameraAngle: "room", Confidence: 0.9, Scale: 1, TimestampSeconds: seconds}}, nil
 }
 
 func scanConfig() config.DetectionConfig {
@@ -67,7 +68,7 @@ func TestCrossScan_MissLeavesTheSampledFramesAndNamesTheFolder(t *testing.T) {
 	fa := &fakeAnalyzer{dir: t.TempDir(), state: func(int) detection.FrameState { return detection.StateNotVisible }}
 	samples := filepath.Join(t.TempDir(), "2026-10-11 10-17-09 cross frames")
 
-	_, err := newCrossScan(scanConfig(), fa.analyze, samples).run(context.Background(), "v.mp4")
+	_, err := newCrossScan(scanConfig(), fa.analyze, samples, io.Discard).run(context.Background(), "v.mp4")
 
 	var miss *CrossNotFoundError
 	if !errors.As(err, &miss) {
@@ -107,7 +108,7 @@ func TestCrossScan_EveryFrameUnreadableIsNothingAnalysedNotNotFound(t *testing.T
 	}
 	samples := filepath.Join(t.TempDir(), "frames")
 
-	_, err := newCrossScan(scanConfig(), fa.analyze, samples).run(context.Background(), "v.mp4")
+	_, err := newCrossScan(scanConfig(), fa.analyze, samples, io.Discard).run(context.Background(), "v.mp4")
 
 	if !errors.Is(err, ErrNothingAnalysed) {
 		t.Fatalf("want ErrNothingAnalysed, got %v", err)
@@ -133,7 +134,7 @@ func TestCrossScan_UnreadableFramesAreCountedInTheMiss(t *testing.T) {
 		unreadable: func(s int) bool { return s >= 300 },
 	}
 
-	_, err := newCrossScan(scanConfig(), fa.analyze, filepath.Join(t.TempDir(), "frames")).run(context.Background(), "v.mp4")
+	_, err := newCrossScan(scanConfig(), fa.analyze, filepath.Join(t.TempDir(), "frames"), io.Discard).run(context.Background(), "v.mp4")
 
 	var miss *CrossNotFoundError
 	if !errors.As(err, &miss) {
@@ -157,7 +158,7 @@ func TestCrossScan_FoundRemovesTheSampledFrames(t *testing.T) {
 	}}
 	samples := filepath.Join(t.TempDir(), "frames")
 
-	res, err := newCrossScan(scanConfig(), fa.analyze, samples).run(context.Background(), "v.mp4")
+	res, err := newCrossScan(scanConfig(), fa.analyze, samples, io.Discard).run(context.Background(), "v.mp4")
 
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -172,7 +173,7 @@ func TestCrossScan_FoundRemovesTheSampledFrames(t *testing.T) {
 
 func TestCrossScan_LitAtTheStartIsZero(t *testing.T) {
 	fa := &fakeAnalyzer{dir: t.TempDir(), state: func(int) detection.FrameState { return detection.StateLit }}
-	res, err := newCrossScan(scanConfig(), fa.analyze, "").run(context.Background(), "v.mp4")
+	res, err := newCrossScan(scanConfig(), fa.analyze, "", io.Discard).run(context.Background(), "v.mp4")
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -235,51 +236,54 @@ func noisyRoom(crossLevel uint8, seed uint32) *image.Gray {
 	return img
 }
 
-// referenceMatch is OpenCV's TM_CCOEFF_NORMED written out in Go: the best
-// normalised score of tmpl over frame, and the mean brightness of the frame
-// under the best match, as the GoCV detector computes them.
-func referenceMatch(name string, frame, tmpl *image.Gray) templateMatch {
+// referenceScoreAt is OpenCV's TM_CCOEFF_NORMED written out in Go: the
+// normalised score of tmpl over frame at one position.
+func referenceScoreAt(frame, tmpl *image.Gray, ox, oy int) float64 {
 	tw, th := tmpl.Bounds().Dx(), tmpl.Bounds().Dy()
 	n := float64(tw * th)
 	var tsum float64
-	for _, p := range tmpl.Pix {
-		tsum += float64(p)
-	}
-	tmean := tsum / n
-	tz := make([]float64, tw*th)
-	var tnorm float64
 	for y := 0; y < th; y++ {
 		for x := 0; x < tw; x++ {
-			d := float64(tmpl.GrayAt(x, y).Y) - tmean
-			tz[y*tw+x] = d
-			tnorm += d * d
+			tsum += float64(tmpl.Pix[y*tmpl.Stride+x])
 		}
 	}
-	best := templateMatch{Name: name, Score: -2, TemplateMean: tmean}
+	tmean := tsum / n
+	var sum, sq, cross, tnorm float64
+	for y := 0; y < th; y++ {
+		for x := 0; x < tw; x++ {
+			d := float64(tmpl.Pix[y*tmpl.Stride+x]) - tmean
+			tnorm += d * d
+			v := float64(frame.Pix[(oy+y)*frame.Stride+ox+x])
+			sum += v
+			sq += v * v
+			cross += v * d
+		}
+	}
+	fvar := sq - sum*sum/n
+	if fvar <= 0 || tnorm <= 0 {
+		return 0
+	}
+	return cross / math.Sqrt(fvar*tnorm)
+}
+
+// referenceMatch is the best reference score of tmpl over frame, with the
+// contrast under the best match as the matcher computes it: the shot's lit
+// picture marks the cross and the wall.
+func referenceMatch(name string, frame, tmpl, litTmpl, unlitTmpl *image.Gray) templateMatch {
+	tw, th := tmpl.Bounds().Dx(), tmpl.Bounds().Dy()
+	best := templateMatch{Name: name, Score: -2, Scale: 1}
 	fw, fh := frame.Bounds().Dx(), frame.Bounds().Dy()
 	for oy := 0; oy+th <= fh; oy++ {
 		for ox := 0; ox+tw <= fw; ox++ {
-			var sum, sq, cross float64
-			for y := 0; y < th; y++ {
-				row := frame.Pix[(oy+y)*frame.Stride+ox:]
-				for x := 0; x < tw; x++ {
-					v := float64(row[x])
-					sum += v
-					sq += v * v
-					cross += v * tz[y*tw+x]
-				}
-			}
-			fvar := sq - sum*sum/n
-			if fvar <= 0 || tnorm <= 0 {
-				continue
-			}
-			score := cross / math.Sqrt(fvar*tnorm)
-			if score > best.Score {
-				best.Score = score
-				best.RegionMean = sum / n
+			if score := referenceScoreAt(frame, tmpl, ox, oy); score > best.Score {
+				best.Score, best.X, best.Y = score, ox, oy
 			}
 		}
 	}
+	bar, wall := contrastMasks(litTmpl)
+	best.Contrast = contrastUnder(frame, best.X, best.Y, tw, th, bar, wall)
+	best.LitContrast = contrastUnder(litTmpl, 0, 0, tw, th, bar, wall)
+	best.UnlitContrast = contrastUnder(unlitTmpl, 0, 0, tw, th, bar, wall)
 	return best
 }
 
@@ -308,10 +312,10 @@ func TestClassifyMatches_SmallTemplateFromTheWideShot(t *testing.T) {
 		{noisyRoom(110, 10), detection.StateUnlit},
 	} {
 		matches := []templateMatch{
-			referenceMatch("room_lit", tc.frame, litTmpl),
-			referenceMatch("room_unlit", tc.frame, unlitTmpl),
+			referenceMatch("room_lit", tc.frame, litTmpl, litTmpl, unlitTmpl),
+			referenceMatch("room_unlit", tc.frame, unlitTmpl, litTmpl, unlitTmpl),
 		}
-		got := classifyMatches(matches, DefaultMatchScore, 60)
+		got, _ := classifyMatches(matches, DefaultMatchScore, 60)
 		if got.State != tc.want || got.CameraAngle != "room" {
 			t.Errorf("want %s on room, got %+v from %+v", tc.want, got, matches)
 		}
@@ -322,9 +326,9 @@ func TestClassifyMatches_SmallTemplateFromTheWideShot(t *testing.T) {
 }
 
 func TestClassifyMatches_BelowTheThresholdIsNotVisible(t *testing.T) {
-	got := classifyMatches([]templateMatch{
-		{Name: "room_lit", Score: 0.6, RegionMean: 200, TemplateMean: 200},
-		{Name: "room_unlit", Score: 0.5, RegionMean: 200, TemplateMean: 90},
+	got, _ := classifyMatches([]templateMatch{
+		{Name: "room_lit", Score: 0.6, Scale: 1, Contrast: 1.2, LitContrast: 1.2, UnlitContrast: 0.2},
+		{Name: "room_unlit", Score: 0.5, Scale: 1, Contrast: 1.2, LitContrast: 1.2, UnlitContrast: 0.2},
 	}, DefaultMatchScore, 60)
 	if got.State != detection.StateNotVisible {
 		t.Errorf("got %+v, want not visible", got)
@@ -338,7 +342,7 @@ func TestCrossScan_MissSaysWhenNoSampledFrameCouldBeSaved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := newCrossScan(scanConfig(), fa.analyze, filepath.Join(blocker, "frames")).run(context.Background(), "v.mp4")
+	_, err := newCrossScan(scanConfig(), fa.analyze, filepath.Join(blocker, "frames"), io.Discard).run(context.Background(), "v.mp4")
 
 	var miss *CrossNotFoundError
 	if !errors.As(err, &miss) {

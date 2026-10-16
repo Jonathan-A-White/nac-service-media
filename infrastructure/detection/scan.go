@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"nac-service-media/domain/detection"
@@ -37,6 +39,18 @@ type CrossNotFoundError struct {
 	FramesKept int
 	KeepErrors int   // sampled frames that could not be saved
 	KeepErr    error // the last of those errors
+
+	Threshold float64        // the score a frame had to reach to show the cross
+	Best      []TemplateBest // each picture's best over the search, highest first
+}
+
+// TemplateBest is the best one picture of the cross scored over a search:
+// the score, at which scale, in the frame at which time.
+type TemplateBest struct {
+	Name    string
+	Score   float64
+	Scale   float64
+	Seconds int
 }
 
 func (e *CrossNotFoundError) Error() string {
@@ -53,13 +67,28 @@ func (e *CrossNotFoundError) Error() string {
 	if e.KeepErrors > 0 {
 		fmt.Fprintf(&b, "; %d sampled frames could not be saved, the last: %v", e.KeepErrors, e.KeepErr)
 	}
+	if len(e.Best) > 0 {
+		fmt.Fprintf(&b, "\nThe best each picture of the cross scored (a frame shows the cross from %.2f):", e.Threshold)
+		width := 0
+		for _, t := range e.Best {
+			width = max(width, len(t.Name))
+		}
+		for _, t := range e.Best {
+			fmt.Fprintf(&b, "\n  %-*s  %.2f at %.2fx in the frame at %s", width, t.Name, t.Score, t.Scale, secondsToTimestamp(t.Seconds))
+		}
+	}
 	return b.String()
+}
+
+// secondsToTimestamp writes a time in the video as HH:MM:SS.
+func secondsToTimestamp(seconds int) string {
+	return fmt.Sprintf("%02d:%02d:%02d", seconds/3600, (seconds%3600)/60, seconds%60)
 }
 
 // frameAnalyzer reads the frame at a time and matches it against the
 // templates. When keep is not nil it calls it with the extracted frame's PNG
 // before removing it.
-type frameAnalyzer func(ctx context.Context, videoPath string, seconds int, keep func(framePath string)) (detection.FrameAnalysis, error)
+type frameAnalyzer func(ctx context.Context, videoPath string, seconds int, keep func(framePath string)) (frameReport, error)
 
 // crossScan finds when the cross lights up: a coarse scan for the first lit
 // frame, a binary search back to the last unlit one, then a second-by-second
@@ -69,21 +98,48 @@ type crossScan struct {
 	startSeconds int
 	endSeconds   int
 	coarseStep   int
+	threshold    float64
 	analyze      frameAnalyzer
-	samplesDir   string // empty: keep no frames
+	samplesDir   string    // empty: keep no frames
+	out          io.Writer // one line per frame looked at
 }
 
-func newCrossScan(cfg config.DetectionConfig, analyze frameAnalyzer, samplesDir string) crossScan {
+func newCrossScan(cfg config.DetectionConfig, analyze frameAnalyzer, samplesDir string, out io.Writer) crossScan {
 	step := cfg.Thresholds.CoarseStepSeconds
 	if step == 0 {
 		step = 30 // Default to 30 seconds
+	}
+	threshold := cfg.Thresholds.MatchScore
+	if threshold == 0 {
+		threshold = DefaultMatchScore
+	}
+	if out == nil {
+		out = io.Discard
 	}
 	return crossScan{
 		startSeconds: cfg.SearchRange.StartMinutes * 60,
 		endSeconds:   cfg.SearchRange.EndMinutes * 60,
 		coarseStep:   step,
+		threshold:    threshold,
 		analyze:      analyze,
 		samplesDir:   samplesDir,
+		out:          out,
+	}
+}
+
+// frameLine is the log's one line for a frame: the time, what it showed, and
+// the match behind that.
+func (s crossScan) frameLine(r frameReport) string {
+	at := secondsToTimestamp(r.TimestampSeconds)
+	best := r.best()
+	switch r.State {
+	case detection.StateLit, detection.StateUnlit:
+		return fmt.Sprintf("  %s  %-5s  %s %.2fx score %.2f (cross %.0f%% lit)", at, r.State, r.CameraAngle, best.Scale, best.Score, 100*math.Max(0, math.Min(1, r.Litness)))
+	default:
+		if best.Name == "" {
+			return fmt.Sprintf("  %s  not in view  (no picture of the cross fits a frame this size)", at)
+		}
+		return fmt.Sprintf("  %s  not in view  best %s %.2f at %.2fx (threshold %.2f)", at, best.Name, best.Score, best.Scale, s.threshold)
 	}
 }
 
@@ -103,18 +159,27 @@ type frameTally struct {
 func (s crossScan) run(ctx context.Context, videoPath string) (detection.DetectionResult, error) {
 	samples := &frameSamples{dir: s.samplesDir}
 	var tally frameTally
-	look := func(seconds int, keep bool) (detection.FrameAnalysis, error) {
+	bests := map[string]TemplateBest{}
+	look := func(seconds int, keep bool) (frameReport, error) {
 		var keepFn func(string)
 		if keep {
 			keepFn = samples.keeper(seconds)
 		}
-		analysis, err := s.analyze(ctx, videoPath, seconds, keepFn)
+		report, err := s.analyze(ctx, videoPath, seconds, keepFn)
 		tally.tried++
 		if err != nil {
 			tally.unreadable++
 			tally.lastErr = err
+			fmt.Fprintf(s.out, "  %s  could not read the frame: %v\n", secondsToTimestamp(seconds), err)
+			return report, err
 		}
-		return analysis, err
+		for _, m := range report.Matches {
+			if prev, ok := bests[m.Name]; !ok || m.Score > prev.Score {
+				bests[m.Name] = TemplateBest{Name: m.Name, Score: m.Score, Scale: m.Scale, Seconds: seconds}
+			}
+		}
+		fmt.Fprintln(s.out, s.frameLine(report))
+		return report, nil
 	}
 
 	result, err := s.search(ctx, look, &tally)
@@ -122,6 +187,16 @@ func (s crossScan) run(ctx context.Context, videoPath string) (detection.Detecti
 		var miss *CrossNotFoundError
 		if errors.As(err, &miss) {
 			miss.KeepErrors, miss.KeepErr = samples.failed, samples.lastErr
+			miss.Threshold = s.threshold
+			for _, b := range bests {
+				miss.Best = append(miss.Best, b)
+			}
+			sort.Slice(miss.Best, func(i, j int) bool {
+				if miss.Best[i].Score != miss.Best[j].Score {
+					return miss.Best[i].Score > miss.Best[j].Score
+				}
+				return miss.Best[i].Name < miss.Best[j].Name
+			})
 			if samples.kept > 0 {
 				miss.FramesDir, miss.FramesKept = samples.dir, samples.kept
 				return result, err
@@ -134,7 +209,7 @@ func (s crossScan) run(ctx context.Context, videoPath string) (detection.Detecti
 	return result, nil
 }
 
-func (s crossScan) search(ctx context.Context, look func(seconds int, keep bool) (detection.FrameAnalysis, error), tally *frameTally) (detection.DetectionResult, error) {
+func (s crossScan) search(ctx context.Context, look func(seconds int, keep bool) (frameReport, error), tally *frameTally) (detection.DetectionResult, error) {
 	// Check if cross is already lit at the very beginning (recording started late)
 	earlyCheck, err := look(5, true) // Check at 5 seconds
 	if err == nil && earlyCheck.State == detection.StateLit {
@@ -142,6 +217,7 @@ func (s crossScan) search(ctx context.Context, look func(seconds int, keep bool)
 		return detection.DetectionResult{
 			Confidence:     earlyCheck.Confidence,
 			CameraAngle:    earlyCheck.CameraAngle,
+			Scale:          earlyCheck.Scale,
 			FramesAnalyzed: tally.tried,
 		}, nil
 	}
@@ -216,8 +292,9 @@ func (s crossScan) search(ctx context.Context, look func(seconds int, keep bool)
 	}
 
 	// Phase 2: Binary search to narrow down
+	fmt.Fprintln(s.out, "  Phase 2: Binary search...")
 	low, high := firstUnlitTime, firstLitTime
-	var lastLitAnalysis detection.FrameAnalysis
+	var lastLitAnalysis frameReport
 
 	for high-low > 1 {
 		if err := ctx.Err(); err != nil {
@@ -241,6 +318,7 @@ func (s crossScan) search(ctx context.Context, look func(seconds int, keep bool)
 	}
 
 	// Phase 3: Refinement - scan second by second around the transition
+	fmt.Fprintln(s.out, "  Phase 3: Refining...")
 	transitionTime := high
 	for t := high - 2; t <= high+2; t++ {
 		if t < low {
@@ -265,6 +343,7 @@ func (s crossScan) search(ctx context.Context, look func(seconds int, keep bool)
 		},
 		Confidence:     lastLitAnalysis.Confidence,
 		CameraAngle:    lastLitAnalysis.CameraAngle,
+		Scale:          lastLitAnalysis.Scale,
 		FramesAnalyzed: tally.tried,
 	}, nil
 }
@@ -328,73 +407,6 @@ func (s *frameSamples) keep(framePath string, seconds int) error {
 func (s *frameSamples) discard() {
 	if s.ready {
 		os.RemoveAll(s.dir)
-	}
-}
-
-// DefaultMatchScore is the template match score (TM_CCOEFF_NORMED, 0-1) a
-// frame must reach to count as showing a shot.
-const DefaultMatchScore = 0.85
-
-// templateMatch is one template's best match in a frame.
-type templateMatch struct {
-	Name         string  // "room_lit", "room_unlit", ...
-	Score        float64 // the normalised match score
-	RegionMean   float64 // mean brightness of the frame under the match
-	TemplateMean float64 // mean brightness of the template
-}
-
-// classifyMatches reads a frame's template matches. The best score says
-// whether a shot is in view and which. Lit or unlit is then decided by
-// brightness: whichever of the shot's two templates is nearer in mean
-// brightness to the frame under the match. The normalised score alone cannot
-// tell a lit cross from an unlit one of the same shape, since it ignores
-// brightness and contrast; with a small cross in a wide shot that is most of
-// what differs.
-func classifyMatches(matches []templateMatch, threshold float64, seconds int) detection.FrameAnalysis {
-	if threshold == 0 {
-		threshold = DefaultMatchScore
-	}
-	var best *templateMatch
-	for i := range matches {
-		m := &matches[i]
-		if best == nil || m.Score > best.Score || (m.Score == best.Score && m.Name < best.Name) {
-			best = m
-		}
-	}
-	if best == nil || best.Score < threshold {
-		analysis := detection.FrameAnalysis{State: detection.StateNotVisible, TimestampSeconds: seconds}
-		if best != nil {
-			analysis.Confidence = best.Score
-		}
-		return analysis
-	}
-
-	shot := strings.TrimSuffix(strings.TrimSuffix(best.Name, "_lit"), "_unlit")
-	state := detection.StateUnlit
-	if strings.HasSuffix(best.Name, "_lit") {
-		state = detection.StateLit
-	}
-	var lit, unlit *templateMatch
-	for i := range matches {
-		switch matches[i].Name {
-		case shot + "_lit":
-			lit = &matches[i]
-		case shot + "_unlit":
-			unlit = &matches[i]
-		}
-	}
-	if lit != nil && unlit != nil {
-		if math.Abs(best.RegionMean-lit.TemplateMean) < math.Abs(best.RegionMean-unlit.TemplateMean) {
-			state = detection.StateLit
-		} else {
-			state = detection.StateUnlit
-		}
-	}
-	return detection.FrameAnalysis{
-		State:            state,
-		CameraAngle:      shot,
-		Confidence:       best.Score,
-		TimestampSeconds: seconds,
 	}
 }
 

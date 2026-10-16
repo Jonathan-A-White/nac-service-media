@@ -29,6 +29,10 @@ type DetectionResult struct {
 	// CameraAngle indicates which template matched ("wide" or "closeup")
 	CameraAngle string
 
+	// Scale is the size of the cross in the video relative to the template's
+	// picture of it (1 = the same size)
+	Scale float64
+
 	// FramesAnalyzed is the number of frames processed during detection
 	FramesAnalyzed int
 }
@@ -57,6 +61,10 @@ type FrameAnalysis struct {
 
 	// Confidence is the match score (0.0-1.0)
 	Confidence float64
+
+	// Scale is the size of the cross in the frame relative to the template's
+	// picture of it (1 = the same size)
+	Scale float64
 
 	// TimestampSeconds is the frame's position in the video
 	TimestampSeconds int
