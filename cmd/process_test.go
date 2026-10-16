@@ -321,6 +321,11 @@ func TestProcess_EveryErrorPathSendsOneFailureEmail(t *testing.T) {
 		{"cross not found", func(r *processRun) {
 			r.detectStart = func(context.Context, string) (string, error) { return "", boom }
 		}, "cross not found"},
+		{"cross search read no frame", func(r *processRun) {
+			r.detectStart = func(context.Context, string) (string, error) {
+				return "", fmt.Errorf("auto-detection failed: %w", fmt.Errorf("cross search could not run: 22 of 22 frames could not be read: %w", infradetection.ErrNothingAnalysed))
+			}
+		}, "cross search could not run"},
 		{"detection off and no --end", func(r *processRun) {
 			r.input.StartTime = "00:14:07"
 			r.cfg.Detection.Enabled = false
@@ -331,6 +336,11 @@ func TestProcess_EveryErrorPathSendsOneFailureEmail(t *testing.T) {
 		{"amen not found", func(r *processRun) {
 			r.detectEnd = func(context.Context, string, int) (string, error) { return "", boom }
 		}, "amen not found"},
+		{"amen search could not run", func(r *processRun) {
+			r.detectEnd = func(context.Context, string, int) (string, error) {
+				return "", fmt.Errorf("end detection failed: %w", fmt.Errorf("amen search could not run: Video too short (%w)", infradetection.ErrNothingAnalysed))
+			}
+		}, "amen search could not run"},
 		{"Drive sign-in fails with --input given", func(r *processRun) {
 			r.input.InputPath = sundayVideo
 			r.newDrive = func(context.Context) (distribution.DriveClient, error) { return nil, boom }
@@ -407,42 +417,5 @@ func TestProcess_CrossMiss_EmailNamesTheSampledFramesAndTemplatesAdd(t *testing.
 		if !strings.Contains(mail.body, want) {
 			t.Errorf("failure email body missing %q\nbody:\n%s", want, mail.body)
 		}
-	}
-}
-
-func TestProcess_SearchesThatAnalysedNothingDoNotReadAsNotFound(t *testing.T) {
-	cases := []struct {
-		name   string
-		break_ func(r *processRun)
-		reason string
-	}{
-		{"cross search read no frame", func(r *processRun) {
-			r.detectStart = func(context.Context, string) (string, error) {
-				return "", fmt.Errorf("auto-detection failed: %w", fmt.Errorf("could not read any of the 22 frames it tried: %w", infradetection.ErrNothingAnalysed))
-			}
-		}, "cross search could not run"},
-		{"amen search could not run", func(r *processRun) {
-			r.detectEnd = func(context.Context, string, int) (string, error) {
-				return "", fmt.Errorf("end detection failed: %w", fmt.Errorf("amen search could not run: Video too short (%w)", infradetection.ErrNothingAnalysed))
-			}
-		}, "amen search could not run"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var out bytes.Buffer
-			mailer := &fakeMailer{}
-			run := newTestRun(&out, mailer)
-			tc.break_(run)
-
-			if err := run.run(context.Background()); err == nil {
-				t.Fatal("expected the run to fail")
-			}
-			if len(mailer.plain) != 1 {
-				t.Fatalf("expected exactly one failure email, got %d", len(mailer.plain))
-			}
-			if !strings.HasSuffix(mailer.plain[0].subject, ": "+tc.reason) {
-				t.Errorf("subject %q should end with %q", mailer.plain[0].subject, tc.reason)
-			}
-		})
 	}
 }
