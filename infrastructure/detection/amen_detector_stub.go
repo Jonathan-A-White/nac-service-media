@@ -4,7 +4,7 @@ package detection
 
 import (
 	"context"
-	"errors"
+	"fmt"
 
 	"nac-service-media/domain/detection"
 	"nac-service-media/infrastructure/config"
@@ -30,7 +30,7 @@ func NewAmenDetector(cfg config.DetectionConfig, opts ...AmenDetectorOption) *Am
 
 // DetectEnd returns an error indicating detection is not available
 func (d *AmenDetector) DetectEnd(ctx context.Context, videoPath string, serviceStartSeconds int) (detection.EndDetectionResult, error) {
-	return detection.EndDetectionResult{}, errors.New("end detection requires -tags=detection build and Python 3 with librosa")
+	return detection.EndDetectionResult{}, fmt.Errorf("end detection requires -tags=detection build and Python 3 with librosa (%w)", ErrNothingAnalysed)
 }
 
 // Ensure AmenDetector implements detection.EndDetector

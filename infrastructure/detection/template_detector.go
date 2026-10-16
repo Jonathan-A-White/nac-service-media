@@ -5,13 +5,12 @@ package detection
 import (
 	"context"
 	"fmt"
+	"image"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"nac-service-media/domain/detection"
-	"nac-service-media/domain/video"
 	"nac-service-media/infrastructure/config"
 
 	"gocv.io/x/gocv"
@@ -19,10 +18,11 @@ import (
 
 // TemplateDetector implements detection.StartDetector using GoCV template matching
 type TemplateDetector struct {
-	templates  map[string]gocv.Mat
-	ffmpegPath string
-	config     config.DetectionConfig
-	tempDir    string
+	templates     map[string]gocv.Mat
+	templateMeans map[string]float64 // mean brightness of each template
+	ffmpegPath    string
+	config        config.DetectionConfig
+	tempDir       string
 }
 
 // TemplateDetectorOption is a functional option for configuring TemplateDetector
@@ -38,9 +38,10 @@ func WithFFmpegPath(path string) TemplateDetectorOption {
 // NewTemplateDetector creates a new template-based detector
 func NewTemplateDetector(cfg config.DetectionConfig, opts ...TemplateDetectorOption) *TemplateDetector {
 	d := &TemplateDetector{
-		templates:  make(map[string]gocv.Mat),
-		ffmpegPath: "ffmpeg",
-		config:     cfg,
+		templates:     make(map[string]gocv.Mat),
+		templateMeans: make(map[string]float64),
+		ffmpegPath:    "ffmpeg",
+		config:        cfg,
 	}
 
 	for _, opt := range opts {
@@ -50,30 +51,21 @@ func NewTemplateDetector(cfg config.DetectionConfig, opts ...TemplateDetectorOpt
 	return d
 }
 
-// LoadTemplates loads template images for matching
+// LoadTemplates loads every shot in the templates folder: each
+// <shot>_lit.png with its <shot>_unlit.png.
 func (d *TemplateDetector) LoadTemplates(templatesDir string) error {
-	templateFiles := map[string]string{
-		"wide_lit":      "wide_lit.png",
-		"wide_unlit":    "wide_unlit.png",
-		"wide2_lit":     "wide2_lit.png",
-		"wide2_unlit":   "wide2_unlit.png",
-		"closeup_lit":   "closeup_lit.png",
-		"closeup_unlit": "closeup_unlit.png",
-		"medium_lit":    "medium_lit.png",
-		"medium_unlit":  "medium_unlit.png",
+	templateFiles, err := TemplateFiles(templatesDir)
+	if err != nil {
+		return err
 	}
 
-	for name, filename := range templateFiles {
-		path := filepath.Join(templatesDir, filename)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return fmt.Errorf("template file not found: %s", path)
-		}
-
+	for name, path := range templateFiles {
 		mat := gocv.IMRead(path, gocv.IMReadGrayScale)
 		if mat.Empty() {
 			return fmt.Errorf("failed to load template: %s", path)
 		}
 		d.templates[name] = mat
+		d.templateMeans[name] = mat.Mean().Val1
 	}
 
 	return nil
@@ -92,163 +84,22 @@ func (d *TemplateDetector) Close() {
 }
 
 // DetectStart implements detection.StartDetector using a 3-phase algorithm
+// (see crossScan). When the cross is not found, the frames of the coarse scan
+// are left in a folder beside the video and named in the error.
 func (d *TemplateDetector) DetectStart(ctx context.Context, videoPath string) (detection.DetectionResult, error) {
 	// Create temp directory for extracted frames
 	var err error
 	d.tempDir, err = os.MkdirTemp("", "nac-detection-*")
 	if err != nil {
-		return detection.DetectionResult{}, fmt.Errorf("failed to create temp directory: %w", err)
+		return detection.DetectionResult{}, fmt.Errorf("failed to create temp directory: %w (%w)", err, ErrNothingAnalysed)
 	}
 
-	// Get search range
-	startSeconds := d.config.SearchRange.StartMinutes * 60
-	endSeconds := d.config.SearchRange.EndMinutes * 60
-	coarseStep := d.config.Thresholds.CoarseStepSeconds
-	if coarseStep == 0 {
-		coarseStep = 30 // Default to 30 seconds
-	}
-
-	var framesAnalyzed int
-
-	// Check if cross is already lit at the very beginning (recording started late)
-	earlyCheck, err := d.analyzeFrame(ctx, videoPath, 5) // Check at 5 seconds
-	framesAnalyzed++
-	if err == nil && earlyCheck.State == detection.StateLit {
-		// Cross is already lit - return 00:00:00 as start
-		return detection.DetectionResult{
-			Timestamp:      video.Timestamp{Hours: 0, Minutes: 0, Seconds: 0},
-			Confidence:     earlyCheck.Confidence,
-			CameraAngle:    earlyCheck.CameraAngle,
-			FramesAnalyzed: framesAnalyzed,
-		}, nil
-	}
-
-	// Phase 1: Coarse scan to find bounds
-	var firstUnlitTime, firstLitTime int
-	foundUnlit, foundLit := false, false
-
-	// Start from 0 if the early check showed unlit or not visible
-	scanStart := 0
-	if earlyCheck.State == detection.StateUnlit {
-		firstUnlitTime = 5
-		foundUnlit = true
-		scanStart = coarseStep // Skip ahead since we already checked the beginning
-	}
-
-	for t := scanStart; t <= endSeconds; t += coarseStep {
-		select {
-		case <-ctx.Done():
-			return detection.DetectionResult{}, ctx.Err()
-		default:
-		}
-
-		analysis, err := d.analyzeFrame(ctx, videoPath, t)
-		framesAnalyzed++
-		if err != nil {
-			continue // Skip frames that fail to extract
-		}
-
-		if analysis.State == detection.StateUnlit && !foundUnlit {
-			firstUnlitTime = t
-			foundUnlit = true
-		}
-		if analysis.State == detection.StateLit && !foundLit {
-			firstLitTime = t
-			foundLit = true
-			break // Found lit, we have our bounds
-		}
-	}
-
-	if !foundLit {
-		return detection.DetectionResult{FramesAnalyzed: framesAnalyzed}, fmt.Errorf("could not detect cross lighting up in search range")
-	}
-
-	// If we found lit but no unlit, search backwards
-	if !foundUnlit {
-		for t := firstLitTime - coarseStep; t >= startSeconds; t -= coarseStep {
-			analysis, err := d.analyzeFrame(ctx, videoPath, t)
-			framesAnalyzed++
-			if err != nil {
-				continue
-			}
-			if analysis.State == detection.StateUnlit || analysis.State == detection.StateNotVisible {
-				firstUnlitTime = t
-				foundUnlit = true
-				break
-			}
-		}
-		if !foundUnlit {
-			firstUnlitTime = startSeconds
-		}
-	}
-
-	// Phase 2: Binary search to narrow down
-	low, high := firstUnlitTime, firstLitTime
-	var lastLitAnalysis detection.FrameAnalysis
-
-	for high-low > 1 {
-		select {
-		case <-ctx.Done():
-			return detection.DetectionResult{}, ctx.Err()
-		default:
-		}
-
-		mid := (low + high) / 2
-		analysis, err := d.analyzeFrame(ctx, videoPath, mid)
-		framesAnalyzed++
-		if err != nil {
-			// On error, bias towards the lit end
-			low = mid
-			continue
-		}
-
-		if analysis.State == detection.StateLit {
-			high = mid
-			lastLitAnalysis = analysis
-		} else {
-			low = mid
-		}
-	}
-
-	// Phase 3: Refinement - scan second by second around the transition
-	transitionTime := high
-	for t := high - 2; t <= high+2; t++ {
-		if t < low {
-			continue
-		}
-		analysis, err := d.analyzeFrame(ctx, videoPath, t)
-		framesAnalyzed++
-		if err != nil {
-			continue
-		}
-		if analysis.State == detection.StateLit {
-			transitionTime = t
-			lastLitAnalysis = analysis
-			break
-		}
-	}
-
-	// Convert to timestamp
-	hours := transitionTime / 3600
-	minutes := (transitionTime % 3600) / 60
-	seconds := transitionTime % 60
-
-	timestamp := video.Timestamp{
-		Hours:   hours,
-		Minutes: minutes,
-		Seconds: seconds,
-	}
-
-	return detection.DetectionResult{
-		Timestamp:      timestamp,
-		Confidence:     lastLitAnalysis.Confidence,
-		CameraAngle:    lastLitAnalysis.CameraAngle,
-		FramesAnalyzed: framesAnalyzed,
-	}, nil
+	return newCrossScan(d.config, d.analyzeFrame, sampleFramesDir(videoPath)).run(ctx, videoPath)
 }
 
-// analyzeFrame extracts and analyzes a single frame from the video
-func (d *TemplateDetector) analyzeFrame(ctx context.Context, videoPath string, timestampSeconds int) (detection.FrameAnalysis, error) {
+// analyzeFrame extracts and analyzes a single frame from the video. When keep
+// is not nil it is given the extracted frame before the frame is removed.
+func (d *TemplateDetector) analyzeFrame(ctx context.Context, videoPath string, timestampSeconds int, keep func(framePath string)) (detection.FrameAnalysis, error) {
 	// Format timestamp for ffmpeg
 	hours := timestampSeconds / 3600
 	minutes := (timestampSeconds % 3600) / 60
@@ -272,61 +123,43 @@ func (d *TemplateDetector) analyzeFrame(ctx context.Context, videoPath string, t
 	// Load and analyze frame
 	frame := gocv.IMRead(framePath, gocv.IMReadGrayScale)
 	if frame.Empty() {
-		return detection.FrameAnalysis{}, fmt.Errorf("failed to read extracted frame")
+		return detection.FrameAnalysis{}, fmt.Errorf("failed to read extracted frame at %s", timestamp)
 	}
 	defer frame.Close()
 
+	if keep != nil {
+		keep(framePath)
+	}
 	return d.analyzeFrameMat(frame, timestampSeconds), nil
 }
 
 // analyzeFrameMat analyzes a frame image against all templates
 func (d *TemplateDetector) analyzeFrameMat(frame gocv.Mat, timestampSeconds int) detection.FrameAnalysis {
-	threshold := d.config.Thresholds.MatchScore
-	if threshold == 0 {
-		threshold = 0.85 // Default threshold
-	}
-
-	var bestMatch struct {
-		name       string
-		score      float64
-		isLit      bool
-		cameraType string
-	}
-
+	matches := make([]templateMatch, 0, len(d.templates))
 	for name, template := range d.templates {
+		if template.Cols() > frame.Cols() || template.Rows() > frame.Rows() {
+			continue // A template larger than the frame cannot be in it
+		}
 		result := gocv.NewMat()
-		gocv.MatchTemplate(frame, template, &result, gocv.TmCcoeffNormed, gocv.NewMat())
-		_, maxVal, _, _ := gocv.MinMaxLoc(result)
+		mask := gocv.NewMat()
+		gocv.MatchTemplate(frame, template, &result, gocv.TmCcoeffNormed, mask)
+		_, maxVal, _, maxLoc := gocv.MinMaxLoc(result)
 		result.Close()
+		mask.Close()
 
-		score := float64(maxVal)
-		if score > bestMatch.score {
-			bestMatch.name = name
-			bestMatch.score = score
-			bestMatch.isLit = strings.HasSuffix(name, "_lit")
-			bestMatch.cameraType = strings.TrimSuffix(strings.TrimSuffix(name, "_lit"), "_unlit")
-		}
+		region := frame.Region(image.Rect(maxLoc.X, maxLoc.Y, maxLoc.X+template.Cols(), maxLoc.Y+template.Rows()))
+		regionMean := region.Mean().Val1
+		region.Close()
+
+		matches = append(matches, templateMatch{
+			Name:         name,
+			Score:        float64(maxVal),
+			RegionMean:   regionMean,
+			TemplateMean: d.templateMeans[name],
+		})
 	}
 
-	if bestMatch.score >= threshold {
-		state := detection.StateUnlit
-		if bestMatch.isLit {
-			state = detection.StateLit
-		}
-		return detection.FrameAnalysis{
-			State:            state,
-			CameraAngle:      bestMatch.cameraType,
-			Confidence:       bestMatch.score,
-			TimestampSeconds: timestampSeconds,
-		}
-	}
-
-	return detection.FrameAnalysis{
-		State:            detection.StateNotVisible,
-		CameraAngle:      "",
-		Confidence:       bestMatch.score,
-		TimestampSeconds: timestampSeconds,
-	}
+	return classifyMatches(matches, d.config.Thresholds.MatchScore, timestampSeconds)
 }
 
 // Ensure TemplateDetector implements detection.StartDetector

@@ -108,22 +108,20 @@ func (d *AmenDetector) DetectEnd(ctx context.Context, videoPath string, serviceS
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			// Try to parse error from stderr or stdout
-			return detection.EndDetectionResult{}, fmt.Errorf("amen detection script failed: %s", string(exitErr.Stderr))
+			return detection.EndDetectionResult{}, fmt.Errorf("amen detection script failed: %s (%w)", string(exitErr.Stderr), ErrNothingAnalysed)
 		}
-		return detection.EndDetectionResult{}, fmt.Errorf("amen detection failed: %w", err)
+		return detection.EndDetectionResult{}, fmt.Errorf("amen detection failed: %w (%w)", err, ErrNothingAnalysed)
 	}
 
 	// Parse JSON result
 	var result pythonResult
 	if err := json.Unmarshal(output, &result); err != nil {
-		return detection.EndDetectionResult{}, fmt.Errorf("failed to parse detection result: %w\nOutput: %s", err, string(output))
+		return detection.EndDetectionResult{}, fmt.Errorf("failed to parse detection result: %w (%w)\nOutput: %s", err, ErrNothingAnalysed, string(output))
 	}
 
 	if !result.Detected {
-		return detection.EndDetectionResult{
-			Detected: false,
-			Error:    result.Error,
-		}, nil
+		// A search that could not run is an error, not a miss
+		return amenNotDetected(result.Error)
 	}
 
 	// Check confidence threshold

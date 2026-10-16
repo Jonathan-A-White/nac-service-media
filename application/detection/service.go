@@ -2,6 +2,7 @@ package detection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -46,6 +47,9 @@ func (s *Service) DetectStart(ctx context.Context, input DetectInput) (*DetectRe
 	// Load templates
 	fmt.Fprintf(s.output, "  Loading templates...\n")
 	if err := detector.LoadTemplates(s.config.TemplatesDir); err != nil {
+		if !errors.Is(err, infradetection.ErrNothingAnalysed) {
+			err = fmt.Errorf("%w (%w)", err, infradetection.ErrNothingAnalysed)
+		}
 		return nil, fmt.Errorf("failed to load detection templates: %w", err)
 	}
 	defer detector.Close()

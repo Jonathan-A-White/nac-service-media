@@ -30,7 +30,7 @@ func WithFFmpegPath(path string) TemplateDetectorOption {
 
 // LoadTemplates returns an error indicating detection is not available
 func (d *TemplateDetector) LoadTemplates(templatesDir string) error {
-	return fmt.Errorf("detection not available: build with '-tags=detection' and install OpenCV/GoCV")
+	return fmt.Errorf("detection not available: build with '-tags=detection' and install OpenCV/GoCV (%w)", ErrNothingAnalysed)
 }
 
 // Close is a no-op in stub mode
@@ -38,7 +38,7 @@ func (d *TemplateDetector) Close() {}
 
 // DetectStart returns an error indicating detection is not available
 func (d *TemplateDetector) DetectStart(ctx context.Context, videoPath string) (detection.DetectionResult, error) {
-	return detection.DetectionResult{}, fmt.Errorf("detection not available: build with '-tags=detection' and install OpenCV/GoCV")
+	return detection.DetectionResult{}, fmt.Errorf("detection not available: build with '-tags=detection' and install OpenCV/GoCV (%w)", ErrNothingAnalysed)
 }
 
 // Ensure TemplateDetector implements detection.StartDetector
