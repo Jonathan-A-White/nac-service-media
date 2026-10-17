@@ -254,8 +254,8 @@ fits better.
 The log has one line per frame looked at, so a run can be read back:
 
 ```
-  00:14:00  unlit  wide 1.00x score 0.81 (cross 12% lit)
-  00:14:30  lit    wide 1.00x score 0.84 (cross 96% lit)
+  00:14:00  unlit  wide 1.00x score 0.81 (cross 12% lit) at (808,28)
+  00:14:30  lit    wide 1.00x score 0.84 (cross 96% lit) at (808,28)
   00:00:05  not in view  best wide_lit 0.61 at 0.92x (threshold 0.75)
 Detected start: 00:14:07 (wide shot at 1.00x, score 0.84)
 ```

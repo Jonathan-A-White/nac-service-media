@@ -138,7 +138,7 @@ func (s crossScan) frameLine(r frameReport) string {
 	best := r.best()
 	switch r.State {
 	case detection.StateLit, detection.StateUnlit:
-		return fmt.Sprintf("  %s  %-5s  %s %.2fx score %.2f (cross %.0f%% lit)", at, r.State, r.CameraAngle, best.Scale, best.Score, clampPercent(r.Litness))
+		return fmt.Sprintf("  %s  %-5s  %s %.2fx score %.2f (cross %.0f%% lit) at (%d,%d)", at, r.State, r.CameraAngle, best.Scale, best.Score, clampPercent(r.Litness), best.X, best.Y)
 	default:
 		if best.Name == "" {
 			return fmt.Sprintf("  %s  not in view  (no picture of the cross fits a frame this size)", at)
