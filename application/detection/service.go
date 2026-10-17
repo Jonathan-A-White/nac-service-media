@@ -27,6 +27,11 @@ func NewService(cfg config.DetectionConfig, output io.Writer) *Service {
 // DetectInput contains input for start detection
 type DetectInput struct {
 	VideoPath string
+	// LeaveNoFrames keeps a miss from leaving the frames it sampled in a
+	// folder beside the video (the detect command, which changes nothing).
+	LeaveNoFrames bool
+	// Frames replaces ffmpeg as the source of frames (tests); nil is ffmpeg.
+	Frames infradetection.FrameExtractor
 }
 
 // DetectResult contains the detection outcome
@@ -42,7 +47,14 @@ func (s *Service) DetectStart(ctx context.Context, input DetectInput) (*DetectRe
 	fmt.Fprintf(s.output, "Analyzing video for service start...\n")
 
 	// Create detector
-	detector := infradetection.NewTemplateDetector(s.config, infradetection.WithOutput(s.output))
+	opts := []infradetection.TemplateDetectorOption{infradetection.WithOutput(s.output)}
+	if input.LeaveNoFrames {
+		opts = append(opts, infradetection.WithSamplesDir(""))
+	}
+	if input.Frames != nil {
+		opts = append(opts, infradetection.WithFrameExtractor(input.Frames))
+	}
+	detector := infradetection.NewTemplateDetector(s.config, opts...)
 
 	// Load templates
 	fmt.Fprintf(s.output, "  Loading templates...\n")

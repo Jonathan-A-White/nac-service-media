@@ -25,6 +25,8 @@ type TemplateDetector struct {
 	out     io.Writer
 	matcher *matcher
 	tempDir string
+
+	samplesDir *string // where a miss leaves its sampled frames; nil: beside the video
 }
 
 // TemplateDetectorOption is a functional option for configuring TemplateDetector
@@ -108,7 +110,7 @@ func (d *TemplateDetector) DetectStart(ctx context.Context, videoPath string) (d
 	if err != nil {
 		return detection.DetectionResult{}, fmt.Errorf("failed to create temp directory: %w (%w)", err, ErrNothingAnalysed)
 	}
-	return newCrossScan(d.config, d.analyzeFrame, sampleFramesDir(videoPath), d.out).run(ctx, videoPath)
+	return newCrossScan(d.config, d.analyzeFrame, d.samplesDirFor(videoPath), d.out).run(ctx, videoPath)
 }
 
 // analyzeFrame extracts and analyzes a single frame from the video. When keep
