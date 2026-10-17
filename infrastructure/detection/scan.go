@@ -271,6 +271,7 @@ func (s crossScan) sampleTimes() []int {
 // A frame of the coarse scan is looked at once; the forward scan reuses it.
 func (s crossScan) staysLit(i int, box image.Rectangle, anchored bool, times []int, look func(seconds int, keep bool) (frameReport, error)) (ok bool, why string) {
 	readable, lit := 0, 0
+	var unlitAt []string
 	for j := i + 1; j < len(times) && times[j]-times[i] <= confirmSeconds; j++ {
 		r, err := look(times[j], true)
 		if err != nil {
@@ -279,7 +280,12 @@ func (s crossScan) staysLit(i int, box image.Rectangle, anchored bool, times []i
 		readable++
 		switch {
 		case r.State == detection.StateUnlit:
-			return false, fmt.Sprintf("the cross was unlit at %s", secondsToTimestamp(times[j]))
+			// One unlit frame is as fallible as one lit one: two say the
+			// cross went dark.
+			unlitAt = append(unlitAt, secondsToTimestamp(times[j]))
+			if len(unlitAt) == 2 {
+				return false, fmt.Sprintf("the cross was unlit at %s and at %s", unlitAt[0], unlitAt[1])
+			}
 		case r.State == detection.StateLit && (anchored || samePlace(r.box(), box)):
 			lit++
 		}
@@ -318,6 +324,7 @@ func (s crossScan) search(ctx context.Context, rawLook func(seconds int, keep bo
 	var unlitBoxes []image.Rectangle
 	start, provisional := -1, -1
 	fleeting, unreadableRun := 0, 0
+	firstUnlit := -1 // the first unlit frame since the provisional start
 	for i, t := range times {
 		if err := ctx.Err(); err != nil {
 			return detection.DetectionResult{}, err
@@ -334,35 +341,46 @@ func (s crossScan) search(ctx context.Context, rawLook func(seconds int, keep bo
 		case detection.StateUnlit:
 			tally.unlit++
 			unlitBoxes = append(unlitBoxes, r.box())
-			if provisional >= 0 {
-				fleeting++
-				fmt.Fprintf(s.out, "  %s  not the start after all: the cross was unlit at %s\n", secondsToTimestamp(times[provisional]), secondsToTimestamp(t))
-				provisional = -1
+			if provisional >= 0 && firstUnlit < 0 {
+				firstUnlit = t
 			}
 		case detection.StateLit:
-			if provisional >= 0 {
-				continue // Lit since the provisional start; nothing new.
-			}
-			if len(unlitBoxes) > 0 && !overlapsAny(r.box(), unlitBoxes) {
-				fleeting++
-				fmt.Fprintf(s.out, "  %s  not the start: lit elsewhere than the cross was seen unlit\n", secondsToTimestamp(t))
+			if len(unlitBoxes) == 0 {
+				if provisional >= 0 {
+					continue // Lit since the provisional start; nothing new.
+				}
+				if ok, why := s.staysLit(i, r.box(), false, times, look); !ok {
+					fleeting++
+					fmt.Fprintf(s.out, "  %s  not the start: %s\n", secondsToTimestamp(t), why)
+					continue
+				}
+				// Lit before the cross was ever seen unlit, so nothing says
+				// where the cross is (a recording that started late, or a
+				// camera parked away from the cross): the start, unless the
+				// rest of the search range shows the cross unlit and then
+				// lit where it was unlit. On 8/9 the camera sat on the
+				// lectern and a TV for ten minutes; a static match there
+				// read "lit" until the wide shot showed the cross unlit,
+				// and lit at 00:12:28.
+				provisional = i
 				continue
 			}
-			ok, why := s.staysLit(i, r.box(), len(unlitBoxes) > 0, times, look)
+			if !overlapsAny(r.box(), unlitBoxes) {
+				if provisional < 0 {
+					fleeting++
+					fmt.Fprintf(s.out, "  %s  not the start: lit elsewhere than the cross was seen unlit\n", secondsToTimestamp(t))
+				}
+				continue
+			}
+			ok, why := s.staysLit(i, r.box(), true, times, look)
 			if !ok {
 				fleeting++
 				fmt.Fprintf(s.out, "  %s  not the start: %s\n", secondsToTimestamp(t), why)
 				continue
 			}
-			if len(unlitBoxes) == 0 {
-				// Lit before the cross was ever seen unlit, so nothing says
-				// where the cross is: the start only if no later frame of
-				// the search range shows the cross unlit. On 8/9 the camera
-				// sat on the lectern and a TV for ten minutes; a static
-				// match there read "lit" until the wide shot showed the
-				// cross unlit.
-				provisional = i
-				continue
+			if provisional >= 0 {
+				fleeting++
+				fmt.Fprintf(s.out, "  %s  not the start after all: the cross was unlit at %s and lit again at %s\n", secondsToTimestamp(times[provisional]), secondsToTimestamp(firstUnlit), secondsToTimestamp(t))
 			}
 			start = i
 		}

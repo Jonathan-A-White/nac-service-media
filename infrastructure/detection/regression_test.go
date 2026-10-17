@@ -154,7 +154,7 @@ func TestRegression_20260809_LitBeforeTheCrossWasSeenUnlitIsRefutedLater(t *test
 	if got := res.Timestamp.String(); got != "00:12:28" {
 		t.Errorf("found %s, want 00:12:28 (the detector once trimmed from 00:00:00)\nlog:\n%s", got, log.String())
 	}
-	if want := "00:00:05  not the start after all: the cross was unlit at 00:05:00"; !strings.Contains(log.String(), want) {
+	if want := "00:00:05  not the start after all: the cross was unlit at 00:05:00 and lit again at 00:13:00"; !strings.Contains(log.String(), want) {
 		t.Errorf("the log should say %q, got:\n%s", want, log.String())
 	}
 }
