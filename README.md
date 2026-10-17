@@ -224,17 +224,19 @@ The detection uses a 3-phase algorithm:
 2. **Binary search**: Narrow down to ~1 second
 3. **Refinement**: Find exact frame
 
-One lit frame never decides the start. The cross must stay lit, in the same
-place in the frame, through the three minutes of samples after it: no sample
-shows the cross unlit anywhere (there is one cross), and at least half of
-the readable ones show it lit there (the camera may look elsewhere
-meanwhile). Lit elsewhere than the cross was seen unlit earlier in the
-recording, it must stay lit for six minutes. On 09/27/2026 the camera panned
-to the choir rehearsing before the service: the moving picture of the unlit
-cross, then a white shirt in the choir close-up, each matched a lit picture
-for a frame, and the old search stopped there, 5:48 early. Such frames are
-logged as `not the start: the cross was unlit at 00:06:00` (or `only 1 of
-the next 6 frames showed it lit there`), and a miss counts them.
+One lit frame never decides the start. Once the cross has been seen unlit
+somewhere in the frame, a lit cross anywhere else is not the start (on
+11/29/2025 a match on the pianist's shot read "lit" for thirteen minutes
+while the cross was out of view). And the cross must stay lit through the
+three minutes of samples after the frame: no sample shows the cross unlit
+anywhere (there is one cross), and at least half of the readable ones show
+it lit (the camera may cut to another shot of it, or look elsewhere
+meanwhile). On 09/27/2026 the camera panned to the choir rehearsing before
+the service: the moving picture of the unlit cross, then a white shirt in
+the choir close-up, each matched a lit picture for a frame, and the old
+search stopped there, 5:48 early. Such frames are logged as `not the start:
+lit elsewhere than the cross was seen unlit` or `not the start: the cross
+was unlit at 00:06:00`, and a miss counts them.
 
 Typical accuracy: within 1 second of actual timestamp.
 

@@ -116,7 +116,7 @@ func TestRegression_20260927_TheChoirRehearsalIsNotTheStart(t *testing.T) {
 		t.Errorf("found %s, want 00:08:42 (the detector once trimmed from 00:02:54)\nlog:\n%s", got, log.String())
 	}
 	for _, want := range []string{
-		"00:03:00  not the start: the cross was unlit at 00:06:00, and it was lit elsewhere than the cross had been seen unlit",
+		"00:03:00  not the start: lit elsewhere than the cross was seen unlit",
 		"00:08:42  lit    wide2 0.77x score 0.85",
 	} {
 		if !strings.Contains(log.String(), want) {

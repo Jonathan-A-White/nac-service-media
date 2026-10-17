@@ -32,7 +32,7 @@ var ErrNothingAnalysed = errors.New("nothing was analysed")
 type CrossNotFoundError struct {
 	Analysed   int   // frames read and matched
 	Unlit      int   // of those, frames that matched an unlit template
-	Fleeting   int   // frames that showed the cross lit, but it did not stay lit
+	Fleeting   int   // frames that showed the cross lit, but elsewhere than it was seen unlit, or not for long
 	Unreadable int   // frames that could not be extracted or read
 	LastErr    error // the last unreadable frame's error
 
@@ -59,7 +59,7 @@ func (e *CrossNotFoundError) Error() string {
 	fmt.Fprintf(&b, "could not detect cross lighting up in search range (looked at %d frames: %d matched an unlit shot, %d matched no shot",
 		e.Analysed, e.Unlit, e.Analysed-e.Unlit)
 	if e.Fleeting > 0 {
-		fmt.Fprintf(&b, "; %d showed the cross lit, but it did not stay lit for %d s (one lit frame never decides the start)", e.Fleeting, confirmSeconds)
+		fmt.Fprintf(&b, "; %d showed the cross lit, but elsewhere than it was seen unlit or not staying lit for %d s (one lit frame never decides the start)", e.Fleeting, confirmSeconds)
 	}
 	if e.Unreadable > 0 {
 		fmt.Fprintf(&b, "; %d could not be read, the last: %v", e.Unreadable, e.LastErr)
@@ -213,13 +213,14 @@ func (s crossScan) run(ctx context.Context, videoPath string) (detection.Detecti
 	return result, nil
 }
 
-// confirmSeconds is how long the cross must stay lit, in the same place,
-// after a frame shows it lit before that frame can be the start: one lit
-// frame never decides. On 9/27 the camera panned to the choir rehearsal
-// before the service; a half-size match on the moving picture of the unlit
-// cross, then a white shirt in the choir close-up, each read as a lit cross
-// for one frame, and the search stopped there, 5:48 early. A lit cross
-// elsewhere than the cross was seen unlit must stay lit twice as long.
+// confirmSeconds is how long the cross must stay lit after a frame shows it
+// lit before that frame can be the start: one lit frame never decides. On
+// 9/27 the camera panned to the choir rehearsal before the service; a
+// half-size match on the moving picture of the unlit cross, then a white
+// shirt in the choir close-up, each read as a lit cross for one frame, and
+// the search stopped there, 5:48 early. Lit elsewhere than the cross was
+// seen unlit is never the start: on 11/29 a match on the pianist's shot
+// stayed "lit" for thirteen minutes while the cross was out of view.
 const confirmSeconds = 180
 
 // minPlaceOverlap is how much of the smaller of two matches' boxes must lie
@@ -258,18 +259,15 @@ func (s crossScan) sampleTimes() []int {
 }
 
 // staysLit says whether the cross, lit in box at the sample i, stays lit
-// there through the next confirmSeconds of samples (twice that when it is
-// lit elsewhere than it was seen unlit): no later sample shows the cross
-// unlit anywhere (there is one cross), and at least half of the readable
-// ones show it lit there (the camera may look elsewhere meanwhile). A frame
-// of the coarse scan is looked at once; the forward scan reuses it.
+// through the next confirmSeconds of samples: no later sample shows the
+// cross unlit anywhere (there is one cross), and at least half of the
+// readable ones show it lit. When the cross was seen unlit before (anchored),
+// lit anywhere counts: the camera may cut to another shot of the lit cross.
+// When nothing has been seen unlit yet, only lit in the same place counts.
+// A frame of the coarse scan is looked at once; the forward scan reuses it.
 func (s crossScan) staysLit(i int, box image.Rectangle, anchored bool, times []int, look func(seconds int, keep bool) (frameReport, error)) (ok bool, why string) {
-	need := confirmSeconds
-	if !anchored {
-		need *= 2
-	}
 	readable, lit := 0, 0
-	for j := i + 1; j < len(times) && times[j]-times[i] <= need && why == ""; j++ {
+	for j := i + 1; j < len(times) && times[j]-times[i] <= confirmSeconds; j++ {
 		r, err := look(times[j], true)
 		if err != nil {
 			continue
@@ -277,24 +275,18 @@ func (s crossScan) staysLit(i int, box image.Rectangle, anchored bool, times []i
 		readable++
 		switch {
 		case r.State == detection.StateUnlit:
-			why = fmt.Sprintf("the cross was unlit at %s", secondsToTimestamp(times[j]))
-		case litAt(r, box):
+			return false, fmt.Sprintf("the cross was unlit at %s", secondsToTimestamp(times[j]))
+		case r.State == detection.StateLit && (anchored || samePlace(r.box(), box)):
 			lit++
 		}
 	}
 	switch {
-	case why != "":
 	case readable == 0:
-		why = "no later frame could be read"
+		return false, "no later frame could be read"
 	case lit < (readable+1)/2:
-		why = fmt.Sprintf("only %d of the next %d frames showed it lit there", lit, readable)
-	default:
-		return true, ""
+		return false, fmt.Sprintf("only %d of the next %d frames showed it lit", lit, readable)
 	}
-	if !anchored {
-		why += ", and it was lit elsewhere than the cross had been seen unlit"
-	}
-	return false, why
+	return true, ""
 }
 
 func (s crossScan) search(ctx context.Context, rawLook func(seconds int, keep bool) (frameReport, error), tally *frameTally) (detection.DetectionResult, error) {
@@ -335,8 +327,12 @@ func (s crossScan) search(ctx context.Context, rawLook func(seconds int, keep bo
 			tally.unlit++
 			unlitBoxes = append(unlitBoxes, r.box())
 		case detection.StateLit:
-			anchored := len(unlitBoxes) == 0 || overlapsAny(r.box(), unlitBoxes)
-			ok, why := s.staysLit(i, r.box(), anchored, times, look)
+			if len(unlitBoxes) > 0 && !overlapsAny(r.box(), unlitBoxes) {
+				fleeting++
+				fmt.Fprintf(s.out, "  %s  not the start: lit elsewhere than the cross was seen unlit\n", secondsToTimestamp(t))
+				continue
+			}
+			ok, why := s.staysLit(i, r.box(), len(unlitBoxes) > 0, times, look)
 			if !ok {
 				fleeting++
 				fmt.Fprintf(s.out, "  %s  not the start: %s\n", secondsToTimestamp(t), why)
