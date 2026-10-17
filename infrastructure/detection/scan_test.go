@@ -119,7 +119,7 @@ func TestCrossScan_EveryFrameUnreadableIsNothingAnalysedNotNotFound(t *testing.T
 	if errors.As(err, &miss) {
 		t.Error("a scan that read no frame must not read as 'cross not found'")
 	}
-	for _, want := range []string{"21 of 21", "failed to extract frame"} {
+	for _, want := range []string{"10 of 10", "failed to extract frame"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err, want)
 		}
@@ -142,11 +142,12 @@ func TestCrossScan_UnreadableFramesAreCountedInTheMiss(t *testing.T) {
 	if !errors.As(err, &miss) {
 		t.Fatalf("want a *CrossNotFoundError, got %v", err)
 	}
-	// The early check at 5 s and 30..270 are read; 300..600 is 11 frames.
-	if miss.Unreadable != 11 || miss.Analysed != 10 {
-		t.Errorf("Analysed %d, Unreadable %d; want 10, 11", miss.Analysed, miss.Unreadable)
+	// The early check at 5 s and 30..270 are read; from 300 on, ten frames
+	// in a row cannot be, and the scan takes the video as ended.
+	if miss.Unreadable != 10 || miss.Analysed != 10 {
+		t.Errorf("Analysed %d, Unreadable %d; want 10, 10", miss.Analysed, miss.Unreadable)
 	}
-	if !strings.Contains(err.Error(), "11 could not be read") {
+	if !strings.Contains(err.Error(), "10 could not be read") {
 		t.Errorf("error %q does not count the unreadable frames", err)
 	}
 }

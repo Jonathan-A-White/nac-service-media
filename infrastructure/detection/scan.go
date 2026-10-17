@@ -247,6 +247,10 @@ func litAt(r frameReport, box image.Rectangle) bool {
 	return r.State == detection.StateLit && samePlace(r.box(), box)
 }
 
+// endOfVideoFrames is how many coarse-scan frames in a row must be
+// unreadable for the scan to take the video as ended and stop.
+const endOfVideoFrames = 10
+
 // sampleTimes are the coarse scan's frame times: 5 s in (a recording that
 // started late shows the cross lit at once), then every step to the end of
 // the search range.
@@ -312,21 +316,33 @@ func (s crossScan) search(ctx context.Context, rawLook func(seconds int, keep bo
 	// cross lit where it was seen unlit (when it was), and that stays lit.
 	times := s.sampleTimes()
 	var unlitBoxes []image.Rectangle
-	start := -1
-	fleeting := 0
+	start, provisional := -1, -1
+	fleeting, unreadableRun := 0, 0
 	for i, t := range times {
 		if err := ctx.Err(); err != nil {
 			return detection.DetectionResult{}, err
 		}
 		r, err := look(t, true)
 		if err != nil {
+			if unreadableRun++; unreadableRun >= endOfVideoFrames {
+				break // The video has ended.
+			}
 			continue
 		}
+		unreadableRun = 0
 		switch r.State {
 		case detection.StateUnlit:
 			tally.unlit++
 			unlitBoxes = append(unlitBoxes, r.box())
+			if provisional >= 0 {
+				fleeting++
+				fmt.Fprintf(s.out, "  %s  not the start after all: the cross was unlit at %s\n", secondsToTimestamp(times[provisional]), secondsToTimestamp(t))
+				provisional = -1
+			}
 		case detection.StateLit:
+			if provisional >= 0 {
+				continue // Lit since the provisional start; nothing new.
+			}
 			if len(unlitBoxes) > 0 && !overlapsAny(r.box(), unlitBoxes) {
 				fleeting++
 				fmt.Fprintf(s.out, "  %s  not the start: lit elsewhere than the cross was seen unlit\n", secondsToTimestamp(t))
@@ -338,11 +354,24 @@ func (s crossScan) search(ctx context.Context, rawLook func(seconds int, keep bo
 				fmt.Fprintf(s.out, "  %s  not the start: %s\n", secondsToTimestamp(t), why)
 				continue
 			}
+			if len(unlitBoxes) == 0 {
+				// Lit before the cross was ever seen unlit, so nothing says
+				// where the cross is: the start only if no later frame of
+				// the search range shows the cross unlit. On 8/9 the camera
+				// sat on the lectern and a TV for ten minutes; a static
+				// match there read "lit" until the wide shot showed the
+				// cross unlit.
+				provisional = i
+				continue
+			}
 			start = i
 		}
 		if start >= 0 {
 			break
 		}
+	}
+	if start < 0 && provisional >= 0 {
+		start = provisional
 	}
 
 	if start < 0 {

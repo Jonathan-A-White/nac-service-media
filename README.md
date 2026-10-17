@@ -236,7 +236,12 @@ the service: the moving picture of the unlit cross, then a white shirt in
 the choir close-up, each matched a lit picture for a frame, and the old
 search stopped there, 5:48 early. Such frames are logged as `not the start:
 lit elsewhere than the cross was seen unlit` or `not the start: the cross
-was unlit at 00:06:00`, and a miss counts them.
+was unlit at 00:06:00`, and a miss counts them. A cross lit before it was
+ever seen unlit (a recording that starts late, or a camera parked away from
+the cross) is the start only if no later frame of the search range shows the
+cross unlit: on 08/09/2026 a static match on the lectern shot read "lit" for
+ten minutes until the wide shot showed the cross unlit. Ten unreadable
+frames in a row end the scan: the video is over.
 
 Typical accuracy: within 1 second of actual timestamp.
 
