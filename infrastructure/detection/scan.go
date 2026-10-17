@@ -263,8 +263,8 @@ func (s crossScan) sampleTimes() []int {
 }
 
 // staysLit says whether the cross, lit in box at the sample i, stays lit
-// through the next confirmSeconds of samples: no later sample shows the
-// cross unlit anywhere (there is one cross), and at least half of the
+// through the next confirmSeconds of samples: no two later samples show
+// the cross unlit anywhere (there is one cross), and at least half of the
 // readable ones show it lit. When the cross was seen unlit before (anchored),
 // lit anywhere counts: the camera may cut to another shot of the lit cross.
 // When nothing has been seen unlit yet, only lit in the same place counts.
