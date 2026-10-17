@@ -124,3 +124,37 @@ func TestRegression_20260927_TheChoirRehearsalIsNotTheStart(t *testing.T) {
 		}
 	}
 }
+
+// 2026-08-09 (mw-6drexa.5): the detector trimmed from 00:00:00; the cross
+// lit at 00:12:28. For the first minutes the camera sat on the lectern and
+// a TV; a static match there read as a lit cross at 5 s, stayed "lit", and
+// nothing had been seen unlit to say where the cross was. The wide shot
+// then showed the cross unlit from 00:04:30 until it lit at 00:12:28.
+func TestRegression_20260809_LitBeforeTheCrossWasSeenUnlitIsRefutedLater(t *testing.T) {
+	replay := &replayFrames{dir: "testdata/2026-08-09", frames: []replayFrame{
+		{0, "00-00-05.png"},   // the lectern and the TV, no cross: a static match reads lit
+		{270, "00-04-30.png"}, // the wide shot, the cross unlit
+		{748, "00-12-28.png"}, // the cross lit: the service
+	}}
+	var log bytes.Buffer
+	d := churchDetector(t, replay, &log)
+
+	in, err := d.Inspect(context.Background(), "2026-08-09 10-19-33.mp4", 5, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(in.Line, "00:00:05  lit    medium 0.50x score 0.83") || !strings.Contains(in.Details[0], "medium_lit     0.83 at 0.50x, 160x84 at (676,952)") {
+		t.Errorf("the frame at 5 s should read as a lit medium shot at (676,952), got %q\n%s", in.Line, strings.Join(in.Details, "\n"))
+	}
+
+	res, err := d.DetectStart(context.Background(), "2026-08-09 10-19-33.mp4")
+	if err != nil {
+		t.Fatalf("DetectStart: %v\nlog:\n%s", err, log.String())
+	}
+	if got := res.Timestamp.String(); got != "00:12:28" {
+		t.Errorf("found %s, want 00:12:28 (the detector once trimmed from 00:00:00)\nlog:\n%s", got, log.String())
+	}
+	if want := "00:00:05  not the start after all: the cross was unlit at 00:05:00"; !strings.Contains(log.String(), want) {
+		t.Errorf("the log should say %q, got:\n%s", want, log.String())
+	}
+}
