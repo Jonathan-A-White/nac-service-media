@@ -1,0 +1,10 @@
+# The truth table: recordings whose true start (the moment the cross lights)
+# a person checked, one row each, tab-separated. Each row's frames are in the
+# folder named after the recording. go test replays every row and fails when
+# the detector's start is more than 10 s from the true start.
+# Add or replace a row with: nac-service-media truth add <recording> <hh:mm:ss>
+# detected: what the detector found when the row was added (none: no start).
+# trimmed_from: where the wrong trim started, when given (-: not given).
+# date	recording	true_start	detected	trimmed_from
+2026-09-27	2026-09-27 10-22-05.mp4	00:08:42	00:08:42	00:02:54
+2026-10-04	2026-10-04 10-21-26.mp4	00:09:43	00:09:43	-
