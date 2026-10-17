@@ -96,6 +96,22 @@ Runs the complete automation: detect/trim → extract audio → upload → email
 #   --date       Override service date YYYY-MM-DD
 ```
 
+### detect - See what the start detector sees, trimming nothing
+
+```bash
+# The search process would run, and the start it would trim from
+nac-service-media detect --input "2026-09-27 10-22-05.mp4"
+
+# What every picture of the cross scores in the named frames, saving each frame
+nac-service-media detect --input "2026-09-27 10-22-05.mp4" --at 00:02:54,00:08:42 --save-frames /tmp/frames
+
+# One line for every 30th second of the search range, no search
+nac-service-media detect --input "2026-09-27 10-22-05.mp4" --every 30
+```
+
+Nothing is trimmed, uploaded, emailed or deleted, and no frames are left
+beside the video; `--input` defaults to the newest file in the source folder.
+
 ### config - Manage Configuration
 
 ```bash
@@ -203,9 +219,22 @@ When `--start` is omitted, the tool automatically detects when the cross lights 
 3. Template images in `config/detection_templates/`
 
 The detection uses a 3-phase algorithm:
-1. **Coarse scan**: Check every 30 seconds
+1. **Coarse scan**: Check every 30 seconds for the first frame that shows the
+   cross lit where it was seen unlit before, and that stays lit there
 2. **Binary search**: Narrow down to ~1 second
 3. **Refinement**: Find exact frame
+
+One lit frame never decides the start. The cross must stay lit, in the same
+place in the frame, for the three minutes of samples after it (no sample
+shows it unlit there, and at least half of the readable ones show it lit
+there; the camera may look elsewhere meanwhile), and when the cross was seen
+unlit earlier in the recording, the lit cross must be where it was seen
+unlit. On 09/27/2026 the camera panned to the choir rehearsing before the
+service: the moving picture of the unlit cross, then a white shirt in the
+choir close-up, each matched a lit picture for a frame, and the old search
+stopped there, 5:48 early. Such frames are logged as `lit elsewhere than the
+cross was seen unlit: not the start` or `did not stay lit (...): not the
+start`, and a miss counts them.
 
 Typical accuracy: within 1 second of actual timestamp.
 
