@@ -314,6 +314,35 @@ templates, detection not built in) says "cross search could not run" instead,
 and an amen search that could not run (for example, the video is too short)
 says "amen search could not run".
 
+### When a trim is wrong: add a case to the truth table
+
+When a trimmed video starts in the wrong place, find the true start: the
+moment the cross lights, as a time into the **recording** (not into the
+trimmed video; `detect --input <recording>` and `templates frame` help). Then,
+in the nac-service-media folder on the church PC:
+
+```bash
+nac-service-media truth add "2026-09-27 10-22-05.mp4" 00:08:42 --trimmed-from 00:02:54
+```
+
+`--trimmed-from` is where the wrong trim started (optional). It runs the
+detector on the recording (a few minutes), cuts the frames it needs around the
+true start, around the detected start and around the wrong trim into
+`testdata/truth/<recording>/`, and adds the row to `testdata/truth/truth.tsv`
+(date, recording, true start, what the detector found, where the trim
+started; adding the same recording again replaces its row and frames). It
+then runs the detector on the kept frames alone, as the tests do, and says
+whether the row passes. On a clip instead of the whole recording, give the
+service's date with `--date YYYY-MM-DD`; elsewhere than the repo's folder,
+give it with `--repo`.
+
+Commit `testdata/truth` and push (or hand it to whoever fixes the detector).
+`go test ./...` replays every row and fails when the detector's start is more
+than 10 seconds from the true one, so after a wrong trim the new row fails
+until the detector is fixed, and stays fixed after that. The tests use the
+church PC's detection settings (`match_score` 0.75, `coarse_step_seconds` 30)
+and `config/detection_templates`.
+
 ### End Detection (Audio)
 
 When `--end` is omitted, the tool automatically detects the end of the three-fold amen song using audio template matching. This requires:
