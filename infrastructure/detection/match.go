@@ -370,6 +370,12 @@ func (r frameReport) best() templateMatch {
 	return r.Matches[0]
 }
 
+// box is where the best match sits in the full frame.
+func (r frameReport) box() image.Rectangle {
+	b := r.best()
+	return image.Rect(b.X, b.Y, b.X+b.Width, b.Y+b.Height)
+}
+
 // analyze matches one frame against every shot at every scale and reads it.
 func (m *matcher) analyze(img image.Image, seconds int) frameReport {
 	wf := newWorkingFrame(img, workingFactor(img.Bounds().Dx()))

@@ -40,7 +40,9 @@ func (f *fakeAnalyzer) analyze(ctx context.Context, videoPath string, seconds in
 		keep(path)
 		os.Remove(path)
 	}
-	return frameReport{FrameAnalysis: detection.FrameAnalysis{State: f.state(seconds), CameraAngle: "room", Confidence: 0.9, Scale: 1, TimestampSeconds: seconds}}, nil
+	// An honest fake: a match has a place in the frame, as the real one does.
+	match := templateMatch{Name: "room_lit", Score: 0.9, Scale: 1, X: 100, Y: 50, Width: 200, Height: 150}
+	return frameReport{FrameAnalysis: detection.FrameAnalysis{State: f.state(seconds), CameraAngle: "room", Confidence: 0.9, Scale: 1, TimestampSeconds: seconds}, Matches: []templateMatch{match}}, nil
 }
 
 func scanConfig() config.DetectionConfig {
@@ -86,17 +88,17 @@ func TestCrossScan_MissLeavesTheSampledFramesAndNamesTheFolder(t *testing.T) {
 		}
 	}
 	names := listDir(t, samples)
-	// The early check at 5 s and every 30 s from 0 to 600 s.
-	if len(names) != 22 || miss.FramesKept != 22 {
-		t.Fatalf("kept %d frames (FramesKept %d), want 22: %v", len(names), miss.FramesKept, names)
+	// The early check at 5 s and every 30 s from 30 to 600 s.
+	if len(names) != 21 || miss.FramesKept != 21 {
+		t.Fatalf("kept %d frames (FramesKept %d), want 21: %v", len(names), miss.FramesKept, names)
 	}
-	for _, want := range []string{"00-00-00.jpg", "00-00-05.jpg", "00-00-30.jpg", "00-10-00.jpg"} {
+	for _, want := range []string{"00-00-05.jpg", "00-00-30.jpg", "00-10-00.jpg"} {
 		if sort.SearchStrings(names, want) == len(names) || names[sort.SearchStrings(names, want)] != want {
 			t.Errorf("no sampled frame %s in %v", want, names)
 		}
 	}
-	if miss.Analysed != 22 || miss.Unreadable != 0 {
-		t.Errorf("Analysed %d, Unreadable %d; want 22, 0", miss.Analysed, miss.Unreadable)
+	if miss.Analysed != 21 || miss.Unreadable != 0 {
+		t.Errorf("Analysed %d, Unreadable %d; want 21, 0", miss.Analysed, miss.Unreadable)
 	}
 }
 
@@ -117,7 +119,7 @@ func TestCrossScan_EveryFrameUnreadableIsNothingAnalysedNotNotFound(t *testing.T
 	if errors.As(err, &miss) {
 		t.Error("a scan that read no frame must not read as 'cross not found'")
 	}
-	for _, want := range []string{"22 of 22", "failed to extract frame"} {
+	for _, want := range []string{"21 of 21", "failed to extract frame"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err, want)
 		}
@@ -351,7 +353,7 @@ func TestCrossScan_MissSaysWhenNoSampledFrameCouldBeSaved(t *testing.T) {
 	if miss.FramesDir != "" {
 		t.Errorf("FramesDir = %q, want none: no frame was saved", miss.FramesDir)
 	}
-	if !strings.Contains(err.Error(), "22 sampled frames could not be saved") || !strings.Contains(err.Error(), blocker) {
+	if !strings.Contains(err.Error(), "21 sampled frames could not be saved") || !strings.Contains(err.Error(), blocker) {
 		t.Errorf("error %q should count the frames that could not be saved and say why", err)
 	}
 }
