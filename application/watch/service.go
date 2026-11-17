@@ -1,5 +1,5 @@
-// Package watch is the Sunday watch: when no service-recording alert for a
-// Sunday is in Postern, look at the church PC (read-only) and sort the day.
+// Package watch is the Sunday and Wednesday watch: when no service-recording
+// alert for a service day is in Postern, look at the church PC (read-only) and sort the day.
 package watch
 
 import (
@@ -17,7 +17,7 @@ import (
 	domain "nac-service-media/domain/watch" // the watch runs from a timer: do not depend on the host's zoneinfo
 )
 
-// Class is how the watch sorted a Sunday.
+// Class is how the watch sorted a service day.
 type Class string
 
 const (
@@ -57,7 +57,7 @@ type Result struct {
 	Body    string
 }
 
-// Service is one Sunday watch.
+// Service is one watch of one service day.
 type Service struct {
 	Alerts Alerts
 	PC     PC
@@ -97,13 +97,13 @@ func (s *Service) Run(ctx context.Context, date string) (Result, error) {
 	for _, a := range alerts {
 		if a.Kind == KindServiceRecording && a.When.In(loc).Format("2006-01-02") == date {
 			if s.DryRun {
-				fmt.Fprintf(s.Out, "Church Sunday watch %s: found service-recording alert %s (dry run: not claimed)\n", date, a.ID)
+				fmt.Fprintf(s.Out, "Church %s watch %s: found service-recording alert %s (dry run: not claimed)\n", dayName(date), date, a.ID)
 				return Result{Class: Found}, nil
 			}
 			if err := s.Alerts.Claim(ctx, a.ID); err != nil {
 				return Result{}, fmt.Errorf("claiming alert %s: %w", a.ID, err)
 			}
-			fmt.Fprintf(s.Out, "Church Sunday watch %s: found service-recording alert %s, claimed\n", date, a.ID)
+			fmt.Fprintf(s.Out, "Church %s watch %s: found service-recording alert %s, claimed\n", dayName(date), date, a.ID)
 			return Result{Class: Found}, nil
 		}
 	}
@@ -114,17 +114,17 @@ func (s *Service) Run(ctx context.Context, date string) (Result, error) {
 		if postern != "" {
 			note = " (Postern could not be asked: " + oneLine(postern) + ")"
 		}
-		fmt.Fprintf(s.Out, "Church Sunday watch %s: %s%s\n", date, res.Class, note)
+		fmt.Fprintf(s.Out, "Church %s watch %s: %s%s\n", dayName(date), date, res.Class, note)
 		return res, nil
 	}
 	if s.DryRun {
-		fmt.Fprintf(s.Out, "Church Sunday watch %s: %s (dry run: mail to mayor not sent)\n--- subject: %s\n%s\n", date, res.Class, res.Subject, res.Body)
+		fmt.Fprintf(s.Out, "Church %s watch %s: %s (dry run: mail to mayor not sent)\n--- subject: %s\n%s\n", dayName(date), date, res.Class, res.Subject, res.Body)
 		return res, nil
 	}
 	if err := s.Mailer.SendMayor(ctx, res.Subject, res.Body); err != nil {
 		return res, fmt.Errorf("class %s but the mail to the Mayor failed: %w", res.Class, err)
 	}
-	fmt.Fprintf(s.Out, "Church Sunday watch %s: %s, mailed the Mayor\n", date, res.Class)
+	fmt.Fprintf(s.Out, "Church %s watch %s: %s, mailed the Mayor\n", dayName(date), date, res.Class)
 	return res, nil
 }
 
@@ -138,7 +138,7 @@ func (s *Service) sort(ctx context.Context, date, postern string) Result {
 		add("Postern could not be asked for the day's alert, so its absence is not confirmed: %s", postern)
 	}
 	finish := func(c Class, why string) Result {
-		subject := fmt.Sprintf("Church Sunday watch %s: %s", date, c)
+		subject := fmt.Sprintf("Church %s watch %s: %s", dayName(date), date, c)
 		body := fmt.Sprintf("No service-recording alert for %s is in Postern at the watch's look.\nClass: %s: %s\n\n%s\n",
 			date, c, why, strings.Join(ev, "\n"))
 		return Result{Class: c, Subject: subject, Body: body}
@@ -188,6 +188,16 @@ func (s *Service) sort(ctx context.Context, date, postern string) Result {
 		return finish(MailNotSent, "a recording exists and the run succeeded, but no log of the day shows a mail sent")
 	}
 	return finish(Other, "a recording exists, the run succeeded and its log shows the mail was sent, yet Postern holds no alert: look at the Gmail forward and the alerts-mail receiver")
+}
+
+// dayName is the weekday of a YYYY-MM-DD date ("Sunday", "Wednesday"), as the
+// watch's log lines and mail subjects name it.
+func dayName(date string) string {
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return "service"
+	}
+	return t.Weekday().String()
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

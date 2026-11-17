@@ -20,6 +20,7 @@ import (
 type WatchOptions struct {
 	Date         string // YYYY-MM-DD, "" for today in America/New_York
 	Sunday       bool   // the latest Sunday, today when it is one (for a catch-up run on Monday)
+	Wednesday    bool   // the latest Wednesday, today when it is one (for a catch-up run on Thursday)
 	DryRun       bool
 	SkipPostern  bool
 	PC           string // user@host of the church PC
@@ -33,11 +34,13 @@ var watchOpts WatchOptions
 
 var watchCmd = &cobra.Command{
 	Use:   "watch",
-	Short: "Sunday watch: is the service recording's alert in Postern? If not, look at the church PC",
-	Long: `Runs on the Laptop, from a systemd timer on Sundays at 1 pm Eastern.
+	Short: "Sunday and Wednesday watch: is the service recording's alert in Postern? If not, look at the church PC",
+	Long: `Runs on the Laptop, from two systemd timers: Sundays at 1 pm Eastern
+(--sunday) and Wednesdays at 10:30 pm Eastern (--wednesday), an hour after the
+church PC's 21:30 run.
 
 It asks Postern (settings in ~/.config/nac-service-media/postern.env) for a
-service-recording alert dated the Sunday. Found: it claims the alert, logs one
+service-recording alert dated that day. Found: it claims the alert, logs one
 line and is done. None: it looks at the church PC over key-only ssh, with
 read-only commands, and sorts the day into one of
 
@@ -49,7 +52,8 @@ read-only commands, and sorts the day into one of
 
 Every class but no-recording sends ONE mail to the Mayor with the evidence.
 
-  nac-service-media watch --date 2026-11-15 --dry-run   # print, send nothing`,
+  nac-service-media watch --date 2026-11-15 --dry-run   # a Sunday: print, send nothing
+  nac-service-media watch --date 2026-11-18 --dry-run   # a Wednesday`,
 	Args: cobra.NoArgs,
 	RunE: runWatch,
 }
@@ -59,6 +63,7 @@ func init() {
 	f := watchCmd.Flags()
 	f.StringVar(&watchOpts.Date, "date", "", "Service date, YYYY-MM-DD (default: today in America/New_York)")
 	f.BoolVar(&watchOpts.Sunday, "sunday", false, "Watch the latest Sunday in America/New_York (today when it is Sunday) instead of today: for the timer, whose Persistent=true catch-up may run on a Monday")
+	f.BoolVar(&watchOpts.Wednesday, "wednesday", false, "Watch the latest Wednesday in America/New_York (today when it is Wednesday) instead of today: for the Wednesday timer, whose Persistent=true catch-up may run on a Thursday")
 	f.BoolVar(&watchOpts.DryRun, "dry-run", false, "Print the mail instead of sending it, and claim nothing")
 	f.BoolVar(&watchOpts.SkipPostern, "skip-postern", false, "Do not ask Postern: treat the day's alert as not found (to check the PC side alone)")
 	f.StringVar(&watchOpts.PC, "pc", "whiteplainsnac@10.88.0.9", "The church PC, user@host, reached by key-only ssh")
@@ -69,12 +74,18 @@ func init() {
 }
 
 // serviceDate is the date to watch: --date, else today in New York, or with
-// --sunday the latest Sunday there.
-func serviceDate(flag string, sunday bool, now time.Time) (string, error) {
-	if flag != "" {
-		if sunday {
-			return "", fmt.Errorf("give --date or --sunday, not both")
+// --sunday or --wednesday the latest such day there. The three refuse each other.
+func serviceDate(flag string, sunday, wednesday bool, now time.Time) (string, error) {
+	given := 0
+	for _, g := range []bool{flag != "", sunday, wednesday} {
+		if g {
+			given++
 		}
+	}
+	if given > 1 {
+		return "", fmt.Errorf("give only one of --date, --sunday and --wednesday")
+	}
+	if flag != "" {
 		if _, err := time.Parse("2006-01-02", flag); err != nil {
 			return "", fmt.Errorf("--date %q is not YYYY-MM-DD", flag)
 		}
@@ -85,8 +96,11 @@ func serviceDate(flag string, sunday bool, now time.Time) (string, error) {
 		return "", err
 	}
 	day := now.In(loc)
-	if sunday {
+	switch {
+	case sunday:
 		day = day.AddDate(0, 0, -int(day.Weekday()))
+	case wednesday:
+		day = day.AddDate(0, 0, -((int(day.Weekday()) - int(time.Wednesday) + 7) % 7))
 	}
 	return day.Format("2006-01-02"), nil
 }
@@ -124,9 +138,9 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	return RunWatchWithDependencies(ctx, o, alerts, pc, &mayormail.Mailer{}, cmd.OutOrStdout())
 }
 
-// RunWatchWithDependencies runs one Sunday watch with its ports given.
+// RunWatchWithDependencies runs one watch (a Sunday or a Wednesday) with its ports given.
 func RunWatchWithDependencies(ctx context.Context, o WatchOptions, alerts domain.Alerts, pc domain.PC, mailer domain.Mailer, out io.Writer) error {
-	date, err := serviceDate(o.Date, o.Sunday, time.Now())
+	date, err := serviceDate(o.Date, o.Sunday, o.Wednesday, time.Now())
 	if err != nil {
 		return err
 	}
