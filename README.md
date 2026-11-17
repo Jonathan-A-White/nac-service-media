@@ -29,6 +29,7 @@ CLI tool to automate the processing and distribution of church service recording
   - [Manual Testing](#manual-testing)
   - [Uninstallation](#uninstallation)
   - [Troubleshooting a Missed Run](#troubleshooting-a-missed-run)
+- [Sunday Watch (Laptop)](#sunday-watch-laptop)
 - [Development](#development)
   - [Running Tests](#running-tests)
   - [Project Structure](#project-structure)
@@ -485,6 +486,60 @@ also exits 1 and emails. In a scheduled run (nobody at the terminal) a Google
 sign-in that needs the browser gives up after two minutes; fix it with
 `nac-service-media auth status --fix`.
 
+## Sunday Watch (Laptop)
+
+The church PC's run mails the A/V team "White Plains: Recording of Service on
+MM/DD/YYYY" after a Sunday recording. That mail is forwarded to Postern, which
+keeps one `service-recording` alert for the Sunday (Postern's
+`docs/alerts-mail.md`). The watch runs on the **Laptop**, not on the church PC,
+and checks that the alert came.
+
+```bash
+nac-service-media watch                       # today, America/New_York
+nac-service-media watch --date 2026-11-15     # one Sunday
+nac-service-media watch --date 2026-11-15 --dry-run   # print the mail, send and claim nothing
+nac-service-media watch --date 2026-11-15 --skip-postern --dry-run   # look at the PC only
+```
+
+What it does, in order:
+
+1. Asks Postern for a `service-recording` alert whose date is the Sunday
+   (settings in `~/.config/nac-service-media/postern.env`, mode 0600, never
+   committed: `POSTERN_URL`, and the family's key as `POSTERN_KEY` or
+   `POSTERN_KEY_FILE`). Found: it claims the alert, logs one line, exits 0, and
+   that is all.
+2. None found: it runs one read-only script on the church PC over
+   `ssh -o BatchMode=yes whiteplainsnac@10.88.0.9` (key-only; it lists that
+   day's `/mnt/d/Videos/<date> *` files and `logs/scheduled-run-<date>_*.log`
+   and greps those logs for `Exit code:`, `FAILURE`, `Sent to:` and `nothing to
+   do`; it writes nothing) and sorts the day:
+
+| Class | Meaning | Action |
+|---|---|---|
+| `no-recording` | The PC answers, no OBS file that day, and the run said nothing to do (or left no log) | quiet: one log line |
+| `pc-unreachable` | ssh could not reach the PC | mail the Mayor |
+| `run-failed` | A recording exists but the run errored, or there is no run log for the day | mail the Mayor |
+| `mail-not-sent` | The run succeeded, but no log of the day shows a mail sent | mail the Mayor |
+| `other` | Anything else: a run that never finished, a run that sent its mail while Postern has no alert, a failure with no recording, an unreadable report, Postern itself not answering | mail the Mayor |
+
+Each non-quiet class sends ONE `mw mail send mayor` with the subject `Church
+Sunday watch <date>: <class>` and the evidence in the body (recording paths and
+sizes, the run logs and the tail of the newest, ssh's error), so the Mayor
+investigates, fixes, installs, re-runs and tells the Governor. If Postern cannot
+be asked (no `postern.env`, a refusal, no network) the watch still looks at the
+PC and says so in the log or the mail.
+
+The Laptop's timer runs `watch --sunday` (the latest Sunday, so a catch-up run
+on Monday still watches Sunday) at **13:00 America/New_York every Sunday**,
+with `Persistent=true`. `make install` (and `make install-watch`, which builds
+without OpenCV) installs it as a systemd user timer; it skips itself on the
+church PC. Check it with `systemctl --user list-timers nac-service-media-watch.timer`;
+the log is `journalctl --user -u nac-service-media-watch`.
+
+The way back: `make uninstall-watch-timer`, or just
+`systemctl --user disable --now nac-service-media-watch.timer`. Nothing else
+depends on it; the church PC's own run and emails are untouched.
+
 ## Development
 
 ### Running Tests
@@ -502,14 +557,18 @@ nac-service-media/
 │   ├── video/             # Video processing
 │   ├── distribution/      # Google Drive
 │   ├── notification/      # Email
-│   └── detection/         # Timestamp detection
+│   ├── detection/         # Timestamp detection
+│   └── watch/             # Sunday watch ports (Postern, church PC, Mayor's mail)
 ├── application/           # Application services
 ├── infrastructure/        # External integrations
 │   ├── config/           # YAML config
 │   ├── ffmpeg/           # ffmpeg wrapper
 │   ├── drive/            # Google Drive client
 │   ├── gmail/            # Gmail client
-│   └── detection/        # Cross template matching (Go, FFT) and the amen wrapper
+│   ├── detection/        # Cross template matching (Go, FFT) and the amen wrapper
+│   ├── postern/          # Postern alerts client (signed) and postern.env
+│   ├── sshpc/            # Read-only ssh to the church PC
+│   └── mayormail/        # mw mail send mayor
 ├── features/              # BDD tests (godog)
 ├── scripts/               # Helper scripts (Python detection)
 └── config/

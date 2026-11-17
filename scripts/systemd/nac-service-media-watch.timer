@@ -1,0 +1,11 @@
+[Unit]
+Description=nac-service-media Sunday watch, Sundays at 1 pm Eastern
+
+[Timer]
+# One o'clock after the church PC's 12:30 run, in the church's zone whatever the Laptop's clock says.
+OnCalendar=Sun *-*-* 13:00:00 America/New_York
+# A Laptop that was off at 1 pm runs the watch when it is next on.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
