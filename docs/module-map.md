@@ -19,6 +19,29 @@ today; modules and files that are only proposed are written in plain text.
 `docs/check-module-map.sh` checks the section list, every backticked path and
 the collision table.
 
+<!-- toc -->
+
+- [1. Modules](#1-modules)
+- [2. Collisions](#2-collisions)
+- [3. Proposed refactors](#3-proposed-refactors)
+  - [R1. Take the composition root and the "already processed" check out of the process command](#r1-take-the-composition-root-and-the-already-processed-check-out-of-the-process-command)
+  - [R2. Split `application/process/service.go` by responsibility](#r2-split-applicationprocessservicego-by-responsibility)
+  - [R3. Give each consumer its own settings and put the config editing behind a port](#r3-give-each-consumer-its-own-settings-and-put-the-config-editing-behind-a-port)
+  - [R4. One Google OAuth module for Drive, Gmail and `auth status`](#r4-one-google-oauth-module-for-drive-gmail-and-auth-status)
+  - [R5. One shared set of test fakes](#r5-one-shared-set-of-test-fakes)
+  - [R6. Email wording as data, and the Gmail adapter only sends](#r6-email-wording-as-data-and-the-gmail-adapter-only-sends)
+  - [R7. One home for service-date parsing and file lookup](#r7-one-home-for-service-date-parsing-and-file-lookup)
+  - [R8. Inject the detectors into the detection service](#r8-inject-the-detectors-into-the-detection-service)
+- [4. Rule breaks](#4-rule-breaks)
+- [5. Library candidates](#5-library-candidates)
+  - [L1. `filelock`: lift now (a second copy already exists)](#l1-filelock-lift-now-a-second-copy-already-exists)
+  - [L2. `googleauth`: lift after R4](#l2-googleauth-lift-after-r4)
+  - [L3. `gmailsend`: after R6](#l3-gmailsend-after-r6)
+  - [L4. `drivepublish`: later, when a second consumer exists](#l4-drivepublish-later-when-a-second-consumer-exists)
+  - [Not candidates](#not-candidates)
+
+<!-- /toc -->
+
 ## 1. Modules
 
 The layout is domain-driven: `domain/` holds types and ports (interfaces) and
