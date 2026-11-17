@@ -1,0 +1,12 @@
+[Unit]
+Description=nac-service-media Wednesday watch: is the service recording's alert in Postern? If not, look at the church PC
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# mw (for the mail to the Mayor) lives in ~/.local/bin; ssh must find the Laptop's key.
+Environment=PATH=%h/.local/bin:%h/go/bin:/usr/local/bin:/usr/bin:/bin
+# mw signs the mail with this seat when none is set.
+Environment=MW_SEAT=nac-wednesday-watch
+ExecStart=@BIN@/nac-service-media watch --wednesday

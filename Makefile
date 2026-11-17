@@ -12,7 +12,7 @@ build-no-detection:
 	go build -o bin/nac-service-media .
 
 # Install the binary with detection to $GOPATH/bin (default), and the Sunday
-# watch's timer (see install-watch-timer; it skips itself on the church PC).
+# watch timers (see install-watch-timer; it skips itself on the church PC).
 install: install-watch-timer
 	go install -tags=detection .
 
@@ -20,32 +20,35 @@ install: install-watch-timer
 install-no-detection:
 	go install .
 
-# The Sunday watch (Laptop): a systemd user timer, Sundays 13:00 America/New_York,
-# running `nac-service-media watch --sunday` from $GOBIN (or $GOPATH/bin).
+# The Sunday and Wednesday watch (Laptop): two systemd user timers, Sundays 13:00
+# and Wednesdays 22:30 (provisional) America/New_York, running
+# `nac-service-media watch --sunday` and `watch --wednesday` from $GOBIN (or $GOPATH/bin).
 # It skips itself where the recordings are (the church PC has /mnt/d/Videos) or
 # where systemctl --user does not answer; WATCH_TIMER=1 forces it, WATCH_TIMER=0
-# skips it. The way back is `make uninstall-watch-timer`.
+# skips it (both timers). The way back is `make uninstall-watch-timer`.
 UNIT_DIR ?= $(HOME)/.config/systemd/user
 install-watch-timer:
-	@if [ "$(WATCH_TIMER)" = "0" ]; then echo "WATCH_TIMER=0: not installing the Sunday watch timer"; exit 0; fi; \
-	if [ "$(WATCH_TIMER)" != "1" ] && [ -d /mnt/d/Videos ]; then echo "Church PC (/mnt/d/Videos exists): not installing the Sunday watch timer"; exit 0; fi; \
-	if ! systemctl --user show-environment >/dev/null 2>&1; then echo "systemctl --user does not answer: not installing the Sunday watch timer"; exit 0; fi; \
+	@if [ "$(WATCH_TIMER)" = "0" ]; then echo "WATCH_TIMER=0: not installing the Sunday and Wednesday watch timers"; exit 0; fi; \
+	if [ "$(WATCH_TIMER)" != "1" ] && [ -d /mnt/d/Videos ]; then echo "Church PC (/mnt/d/Videos exists): not installing the Sunday and Wednesday watch timers"; exit 0; fi; \
+	if ! systemctl --user show-environment >/dev/null 2>&1; then echo "systemctl --user does not answer: not installing the Sunday and Wednesday watch timers"; exit 0; fi; \
 	bin="$${GOBIN:-$$(go env GOPATH)/bin}"; \
 	mkdir -p "$(UNIT_DIR)"; \
 	sed "s|@BIN@|$$bin|" scripts/systemd/nac-service-media-watch.service > "$(UNIT_DIR)/nac-service-media-watch.service"; \
 	cp scripts/systemd/nac-service-media-watch.timer "$(UNIT_DIR)/nac-service-media-watch.timer"; \
+	sed "s|@BIN@|$$bin|" scripts/systemd/nac-service-media-watch-wednesday.service > "$(UNIT_DIR)/nac-service-media-watch-wednesday.service"; \
+	cp scripts/systemd/nac-service-media-watch-wednesday.timer "$(UNIT_DIR)/nac-service-media-watch-wednesday.timer"; \
 	systemctl --user daemon-reload; \
-	systemctl --user enable --now nac-service-media-watch.timer; \
-	echo "Sunday watch timer installed:"; systemctl --user list-timers nac-service-media-watch.timer --no-pager
+	systemctl --user enable --now nac-service-media-watch.timer nac-service-media-watch-wednesday.timer; \
+	echo "Sunday and Wednesday watch timers installed:"; systemctl --user list-timers 'nac-service-media-watch*.timer' --no-pager
 
 # Laptop: the binary without detection (OpenCV is not on the Laptop) and the timer.
 # Never run this on the church PC: it would replace the detection binary.
 install-watch: install-no-detection install-watch-timer
 
-# Turn the Sunday watch off: stop the timer and delete its two unit files.
+# Turn the Sunday and Wednesday watch off: stop both timers and delete their four unit files.
 uninstall-watch-timer:
-	-systemctl --user disable --now nac-service-media-watch.timer
-	rm -f $(UNIT_DIR)/nac-service-media-watch.timer $(UNIT_DIR)/nac-service-media-watch.service
+	-systemctl --user disable --now nac-service-media-watch.timer nac-service-media-watch-wednesday.timer
+	rm -f $(UNIT_DIR)/nac-service-media-watch.timer $(UNIT_DIR)/nac-service-media-watch.service $(UNIT_DIR)/nac-service-media-watch-wednesday.timer $(UNIT_DIR)/nac-service-media-watch-wednesday.service
 	-systemctl --user daemon-reload
 
 # Default recipient for test-production
@@ -129,9 +132,9 @@ help:
 	@echo "  build-no-detection       - Build without detection"
 	@echo "  install                  - Install with detection to GOPATH/bin (default)"
 	@echo "  install-no-detection     - Install without detection to GOPATH/bin"
-	@echo "  install-watch            - Laptop: install without detection, and the Sunday watch timer"
-	@echo "  install-watch-timer      - Install the Sunday watch's systemd user timer (Sundays 13:00 America/New_York)"
-	@echo "  uninstall-watch-timer    - Remove the Sunday watch's timer"
+	@echo "  install-watch            - Laptop: install without detection, and the Sunday and Wednesday watch timers"
+	@echo "  install-watch-timer      - Install the Sunday and Wednesday watch's systemd user timers (Sundays 13:00, Wednesdays 22:30 America/New_York)"
+	@echo "  uninstall-watch-timer    - Remove the Sunday and Wednesday watch's timers"
 	@echo "  update-and-install      - Git pull and install with detection"
 	@echo "  test-production          - Update, install, and run process (RECIPIENT=Jonathan)"
 	@echo "  install-deps             - Install system dependencies (Ubuntu/Debian)"

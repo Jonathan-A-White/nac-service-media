@@ -1,0 +1,12 @@
+[Unit]
+Description=nac-service-media Wednesday watch, Wednesdays at 10:30 pm Eastern
+
+[Timer]
+# An hour after the church PC's 21:30 run, in the church's zone whatever the Laptop's clock says.
+# PROVISIONAL: the Governor confirms the time.
+OnCalendar=Wed *-*-* 22:30:00 America/New_York
+# A Laptop that was off at 10:30 pm runs the watch when it is next on.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
