@@ -6,6 +6,7 @@ toolchain go1.24.11
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.7
+	github.com/btcsuite/btcd/btcec/v2 v2.3.4
 	github.com/cucumber/godog v0.15.0
 	github.com/spf13/cobra v1.8.1
 	golang.org/x/oauth2 v0.34.0
@@ -19,6 +20,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/cucumber/gherkin/go/v26 v26.2.0 // indirect
 	github.com/cucumber/messages/go/v21 v21.0.1 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
