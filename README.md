@@ -2,6 +2,40 @@
 
 CLI tool to automate the processing and distribution of church service recordings.
 
+<!-- toc -->
+
+- [What It Does](#what-it-does)
+- [Installation (WSL Ubuntu)](#installation-wsl-ubuntu)
+  - [1. Install System Dependencies](#1-install-system-dependencies)
+  - [2. Clone and Build](#2-clone-and-build)
+  - [3. Configure](#3-configure)
+- [Quick Start](#quick-start)
+- [Commands](#commands)
+  - [process - Full Workflow](#process---full-workflow)
+  - [detect - See what the start detector sees, trimming nothing](#detect---see-what-the-start-detector-sees-trimming-nothing)
+  - [config - Manage Configuration](#config---manage-configuration)
+  - [Individual Commands](#individual-commands)
+- [Configuration](#configuration)
+- [Google Cloud Setup](#google-cloud-setup)
+  - [Drive API](#drive-api)
+  - [Gmail API](#gmail-api)
+- [Auto-Detection](#auto-detection)
+  - [Start Detection (Visual)](#start-detection-visual)
+  - [When the cross is not found](#when-the-cross-is-not-found)
+  - [When a trim is wrong: add a case to the truth table](#when-a-trim-is-wrong-add-a-case-to-the-truth-table)
+  - [End Detection (Audio)](#end-detection-audio)
+- [Scheduled Automation (Windows)](#scheduled-automation-windows)
+  - [Installation](#installation)
+  - [Manual Testing](#manual-testing)
+  - [Uninstallation](#uninstallation)
+  - [Troubleshooting a Missed Run](#troubleshooting-a-missed-run)
+- [Development](#development)
+  - [Running Tests](#running-tests)
+  - [Project Structure](#project-structure)
+- [License](#license)
+
+<!-- /toc -->
+
 ## What It Does
 
 Transforms a raw OBS recording into trimmed video and audio files, uploads them to Google Drive, and sends notification emails with shareable links.
