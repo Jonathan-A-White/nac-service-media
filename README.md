@@ -430,10 +430,16 @@ To run a missed week by hand (this goes through the wrapper, so it produces a lo
 schtasks /run /tn "NAC-Service-Media-Weekly-Sunday"
 ```
 
-Note that a run whose `.mp4` and `.mp3` are already on Drive exits early (exit
+Note that a run whose `.mp4` and `.mp3` are already on Drive (and is 6 days old or less) exits early (exit
 code 0) with `Most recent file (...) has already been processed` and sends no
 email — so a partial run that uploaded but failed before emailing cannot be
 retried this way.
+
+A run that finds the newest recording already on Drive and more than 6 days old
+sends one email titled `No new service recording since <date>` and exits
+non-zero (the log says `FAILURE`): it means OBS made no new file, so look in the
+OBS logs under `%APPDATA%\obs-studio\logs` (and, if there is no run log for
+that day either, at whether the PC was on).
 
 When a run fails (cross or amen not found, Google sign-in, upload, ffmpeg, ...)
 it sends one email to its `--recipient` titled `Service recording NOT processed:

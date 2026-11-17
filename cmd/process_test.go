@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	appprocess "nac-service-media/application/process"
 	"nac-service-media/domain/distribution"
@@ -183,10 +184,7 @@ func TestProcess_AmenNotFoundAfterCross_HandCommandCarriesStart(t *testing.T) {
 func TestProcess_AlreadyProcessed_ExitsZeroAndSendsNothing(t *testing.T) {
 	var out bytes.Buffer
 	mailer := &fakeMailer{}
-	run := newTestRun(&out, mailer)
-	run.newDrive = func(ctx context.Context) (distribution.DriveClient, error) {
-		return &fakeDrive{existing: map[string]bool{"2026-10-11.mp4": true, "2026-10-11.mp3": true}}, nil
-	}
+	run := processedRun(&out, mailer, time.Date(2026, 10, 12, 8, 0, 0, 0, time.Local))
 
 	err := run.run(context.Background())
 
@@ -201,6 +199,103 @@ func TestProcess_AlreadyProcessed_ExitsZeroAndSendsNothing(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "already been processed") {
 		t.Errorf("log line should say it was already processed, got %q", out.String())
+	}
+}
+
+// processedRun is a run whose newest video (2026-10-11) is already on Drive and
+// whose clock reads now.
+func processedRun(out *bytes.Buffer, mailer *fakeMailer, now time.Time) *processRun {
+	run := newTestRun(out, mailer)
+	run.now = func() time.Time { return now }
+	run.newDrive = func(ctx context.Context) (distribution.DriveClient, error) {
+		return &fakeDrive{existing: map[string]bool{"2026-10-11.mp4": true, "2026-10-11.mp3": true}}, nil
+	}
+	return run
+}
+
+// A Sunday was missed: the newest recording is 7 days old and already on
+// Drive, so the run tells the recipient once, and exits non-zero so the
+// scheduled task's log says FAILURE, not SUCCESS.
+func TestProcess_NewestRecordingOver6DaysOld_EmailsOnceAndExitsNonZero(t *testing.T) {
+	var out bytes.Buffer
+	mailer := &fakeMailer{}
+	run := processedRun(&out, mailer, time.Date(2026, 10, 18, 12, 0, 0, 0, time.Local))
+
+	err := run.run(context.Background())
+
+	if err == nil {
+		t.Fatal("a missed Sunday must not exit 0: the scheduled task would log SUCCESS")
+	}
+	if len(mailer.plain) != 1 || len(mailer.links) != 0 {
+		t.Fatalf("expected exactly one plain email, got %d plain and %d links", len(mailer.plain), len(mailer.links))
+	}
+	mail := mailer.plain[0]
+	if len(mail.to) != 1 || mail.to[0].Address != "jane@example.com" {
+		t.Errorf("email should go to the run's --recipient, got %+v", mail.to)
+	}
+	if want := "No new service recording since 2026-10-11"; mail.subject != want {
+		t.Errorf("subject = %q, want %q", mail.subject, want)
+	}
+	for _, want := range []string{
+		"2026-10-11 10-17-09.mp4",
+		"2026-10-11",
+		"/test/source",
+		"7 days",
+		"Last service on Drive: 2026-10-11",
+	} {
+		if !strings.Contains(mail.body, want) {
+			t.Errorf("email body missing %q\nbody:\n%s", want, mail.body)
+		}
+	}
+	if strings.Contains(mail.subject, "NOT processed") {
+		t.Errorf("a missed Sunday is not a failed run; subject = %q", mail.subject)
+	}
+}
+
+// A Wednesday run, 3 days after a recorded Sunday, stays quiet.
+func TestProcess_NewestRecording3DaysOld_StaysQuiet(t *testing.T) {
+	var out bytes.Buffer
+	mailer := &fakeMailer{}
+	run := processedRun(&out, mailer, time.Date(2026, 10, 14, 12, 0, 0, 0, time.Local))
+
+	if err := run.run(context.Background()); err != nil {
+		t.Fatalf("a recent, already processed video is not a failure; got %v", err)
+	}
+	if len(mailer.plain) != 0 || len(mailer.links) != 0 {
+		t.Errorf("expected no email, got %d plain and %d links", len(mailer.plain), len(mailer.links))
+	}
+	if got := strings.Count(out.String(), "\n"); got != 1 || !strings.Contains(out.String(), "has already been processed; nothing to do") {
+		t.Errorf("expected the one 'nothing to do' line, got %q", out.String())
+	}
+}
+
+// 6 days is the edge: the next Sunday's run is 7 days after the last one, a
+// run on the same Saturday is not late yet.
+func TestProcess_NewestRecordingExactly6DaysOld_StaysQuiet(t *testing.T) {
+	var out bytes.Buffer
+	mailer := &fakeMailer{}
+	run := processedRun(&out, mailer, time.Date(2026, 10, 17, 23, 59, 0, 0, time.Local))
+
+	if err := run.run(context.Background()); err != nil {
+		t.Fatalf("6 days old is not stale; got %v", err)
+	}
+	if len(mailer.plain) != 0 {
+		t.Errorf("expected no email, got %d", len(mailer.plain))
+	}
+}
+
+func TestProcess_StaleEmailCannotBeSent_LogsLoudlyAndExitsNonZero(t *testing.T) {
+	var out bytes.Buffer
+	mailer := &fakeMailer{sendErr: errors.New("oauth2: token expired")}
+	run := processedRun(&out, mailer, time.Date(2026, 10, 18, 12, 0, 0, 0, time.Local))
+
+	if err := run.run(context.Background()); err == nil {
+		t.Fatal("expected a non-zero exit")
+	}
+	for _, want := range []string{"EMAIL NOT SENT", "token expired"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("log should say loudly %q\nlog:\n%s", want, out.String())
+		}
 	}
 }
 

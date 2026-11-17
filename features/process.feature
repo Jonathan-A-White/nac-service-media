@@ -264,6 +264,31 @@ Feature: End-to-End Process Command
     Then the process should fail with error "has already been processed"
     And the error should suggest command "--input"
 
+  # The scheduled task runs 'process --recipient <key>' on Sundays and Wednesdays.
+  Scenario: A missed Sunday: the newest recording is over 6 days old and already processed
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    And drive has processed files:
+      | name           |
+      | 2025-12-28.mp4 |
+      | 2025-12-28.mp3 |
+    When the scheduled run starts on "2026-01-04" for recipient "jane"
+    Then an email with subject "No new service recording since 2025-12-28" should be sent to "jane@example.com"
+    And the email should say "2025-12-28 10-06-16.mp4"
+    And the email should say "Last service on Drive: 2025-12-28"
+    And the email should say "7 days old"
+    And the process should fail with error "no new service recording since 2025-12-28"
+
+  Scenario: A Wednesday run three days after a recorded Sunday stays quiet
+    Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
+    And drive has processed files:
+      | name           |
+      | 2025-12-28.mp4 |
+      | 2025-12-28.mp3 |
+    When the scheduled run starts on "2025-12-31" for recipient "jane"
+    Then the process should succeed
+    And the output should include "has already been processed; nothing to do"
+    And no email should be sent
+
   Scenario: Process partial upload when only mp3 exists in Drive
     Given a source video exists at "/test/source/2025-12-28 10-06-16.mp4"
     And drive has processed files:

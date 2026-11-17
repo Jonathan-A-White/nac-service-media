@@ -76,7 +76,9 @@ If the run fails, it sends one email to the --recipient (subject "Service
 recording NOT processed: <date>: <reason>") with what failed, the video, the
 last lines of the log and the process command that finishes it by hand, and
 exits non-zero. A newest video that is already on Drive is not a failure: one
-log line, no email, exit 0. When nobody is at the terminal (the scheduled
+log line, no email, exit 0. Unless it is more than 6 days old: then no new
+recording was made, and one email (subject "No new service recording since
+<date>") says so and the run exits non-zero. When nobody is at the terminal (the scheduled
 task), a Google sign-in that needs the browser gives up after two minutes.
 
 Example:
@@ -237,6 +239,7 @@ type processRun struct {
 	detectStart func(ctx context.Context, videoPath string) (string, error)
 	detectEnd   func(ctx context.Context, videoPath string, startSeconds int) (string, error)
 	workflow    func(ctx context.Context, driveClient distribution.DriveClient, mailer notification.EmailSender, input ProcessInput) error
+	now         func() time.Time // the run's clock; time.Now when nil
 
 	// What the run knew when it stopped, for the failure email.
 	videoPath   string
@@ -275,10 +278,70 @@ const signInHint = "sign in to Google again: in WSL, in the nac-service-media fo
 // notifyFailure, the one failure notifier.
 func (r *processRun) run(ctx context.Context) error {
 	err := r.execute(ctx)
-	if err != nil {
+	var stale *staleRecordingError
+	switch {
+	case errors.As(err, &stale):
+		r.notifyStale(ctx, stale.StaleRecording)
+	case err != nil:
 		r.notifyFailure(ctx, err)
 	}
 	return err
+}
+
+// clock is the run's time; tests inject it.
+func (r *processRun) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
+}
+
+// staleRecordingError ends a run that found the newest recording already
+// processed and more than 6 days old. It exits non-zero so the scheduled
+// task's log says FAILURE, not SUCCESS, and gets its own email, not the
+// failure email.
+type staleRecordingError struct {
+	appprocess.StaleRecording
+}
+
+func (e *staleRecordingError) Error() string {
+	return fmt.Sprintf("no new service recording since %s: the newest file in %s is already processed",
+		e.ServiceDate.Format("2006-01-02"), e.Folder)
+}
+
+// recipientsAndMailer finds the run's --recipient and signs in to Gmail.
+func (r *processRun) recipientsAndMailer(ctx context.Context) ([]notification.Recipient, processMailer, error) {
+	if r.cfg == nil {
+		return nil, nil, errors.New("no configuration, so no recipient and no Gmail sign-in")
+	}
+	to, lookupErr := config.NewRecipientLookup(r.cfg, "").LookupRecipients(r.input.RecipientKeys)
+	if lookupErr == nil && len(to) == 0 {
+		lookupErr = errors.New("no --recipient given")
+	}
+	if lookupErr != nil {
+		return nil, nil, fmt.Errorf("cannot find the --recipient to tell: %w", lookupErr)
+	}
+	mailer, mailerErr := r.gmail(ctx)
+	if mailerErr != nil {
+		return nil, nil, fmt.Errorf("Gmail sign-in failed: %w", mailerErr)
+	}
+	return to, mailer, nil
+}
+
+// notifyStale sends the one "no new recording" email, or says loudly in the
+// log that nobody was told.
+func (r *processRun) notifyStale(ctx context.Context, s appprocess.StaleRecording) {
+	to, mailer, err := r.recipientsAndMailer(ctx)
+	if err == nil {
+		err = appprocess.SendStaleEmail(mailer, to, s)
+	}
+	if err != nil {
+		r.emailNotSent("NO-NEW-RECORDING EMAIL NOT SENT", "No new recording has come and nobody has been told. Read this log.", err)
+		return
+	}
+	for _, rcpt := range to {
+		fmt.Fprintf(r.out, "No-new-recording email sent to %s <%s>: %s\n", rcpt.Name, rcpt.Address, s.Subject())
+	}
 }
 
 // drive creates the Drive client once per run.
@@ -356,8 +419,19 @@ func (r *processRun) execute(ctx context.Context) error {
 				return fail("Google Drive check failed", fmt.Errorf("failed to check Drive for existing files: %w", mp3Err))
 			}
 			if mp4File != nil && mp3File != nil {
-				// No new video: not a failure, so no email and exit 0.
 				fmt.Fprintf(r.out, "Most recent file (%s) has already been processed; nothing to do. Use --input to process a different file.\n", dateStr)
+				// A recent recording already on Drive is the normal midweek run:
+				// quiet, exit 0. One over appprocess.StaleAfterDays old means a
+				// Sunday went by with no new file, and he must hear of it.
+				if appprocess.AgeInDays(serviceDate, r.clock()) > appprocess.StaleAfterDays {
+					return &staleRecordingError{StaleRecording: appprocess.StaleRecording{
+						VideoPath:     videoPath,
+						ServiceDate:   serviceDate,
+						Folder:        cfg.Paths.SourceDirectory,
+						LastProcessed: serviceDate,
+						When:          r.clock(),
+					}}
+				}
 				return nil
 			}
 		}
@@ -490,21 +564,9 @@ func (r *processRun) notifyFailure(ctx context.Context, err error) {
 		failure.LogTail = r.tail.Lines()
 	}
 
-	if r.cfg == nil {
-		r.failureEmailNotSent(errors.New("no configuration, so no recipient and no Gmail sign-in"))
-		return
-	}
-	to, lookupErr := config.NewRecipientLookup(r.cfg, "").LookupRecipients(r.input.RecipientKeys)
-	if lookupErr == nil && len(to) == 0 {
-		lookupErr = errors.New("no --recipient given")
-	}
+	to, mailer, lookupErr := r.recipientsAndMailer(ctx)
 	if lookupErr != nil {
-		r.failureEmailNotSent(fmt.Errorf("cannot find the --recipient to tell: %w", lookupErr))
-		return
-	}
-	mailer, mailerErr := r.gmail(ctx)
-	if mailerErr != nil {
-		r.failureEmailNotSent(fmt.Errorf("Gmail sign-in failed: %w", mailerErr))
+		r.failureEmailNotSent(lookupErr)
 		return
 	}
 	if sendErr := appprocess.SendFailureEmail(mailer, to, failure); sendErr != nil {
@@ -518,10 +580,15 @@ func (r *processRun) notifyFailure(ctx context.Context, err error) {
 
 // failureEmailNotSent says loudly in the log that nobody was told.
 func (r *processRun) failureEmailNotSent(err error) {
+	r.emailNotSent("FAILURE EMAIL NOT SENT", "This run failed and nobody has been told. Read this log.", err)
+}
+
+// emailNotSent writes the loud banner for an email that could not go out.
+func (r *processRun) emailNotSent(title, advice string, err error) {
 	fmt.Fprintln(r.out)
 	fmt.Fprintln(r.out, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-	fmt.Fprintf(r.out, "!!! FAILURE EMAIL NOT SENT: %v\n", err)
-	fmt.Fprintln(r.out, "!!! This run failed and nobody has been told. Read this log.")
+	fmt.Fprintf(r.out, "!!! %s: %v\n", title, err)
+	fmt.Fprintf(r.out, "!!! %s\n", advice)
 	fmt.Fprintln(r.out, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 	fmt.Fprintln(r.out)
 }
@@ -765,6 +832,49 @@ func RunProcessWithDependencies(
 
 	_, err = service.Process(ctx, processInput)
 	return err
+}
+
+// RunScheduledProcessWithDependencies runs the scheduled task's command, the
+// auto-detect 'process --recipient <key>' (the whole processRun, not only the
+// service), with its outside world faked and its clock given (for testing).
+func RunScheduledProcessWithDependencies(
+	ctx context.Context,
+	cfg *config.Config,
+	driveService drive.DriveService,
+	gmailService gmail.GmailService,
+	fileFinder FileFinder,
+	recipientKeys []string,
+	output io.Writer,
+	now time.Time,
+) error {
+	run := &processRun{
+		cfg:         cfg,
+		input:       ProcessInput{RecipientKeys: recipientKeys},
+		out:         output,
+		lockPath:    "(none: test)",
+		acquireLock: func() (func(), error) { return func() {}, nil },
+		findNewest: func(dir string) (string, error) {
+			return fileFinder.FindNewestFile(dir, ".mp4")
+		},
+		newDrive: func(ctx context.Context) (distribution.DriveClient, error) {
+			return drive.NewClient(ctx, "", drive.WithDriveService(driveService))
+		},
+		newMailer: func(ctx context.Context) (processMailer, error) {
+			from := notification.Recipient{Name: cfg.Email.FromName, Address: cfg.Email.FromAddress}
+			return gmail.NewClient(from, gmail.WithGmailService(gmailService)), nil
+		},
+		detectStart: func(context.Context, string) (string, error) {
+			return "", errors.New("detection is not available in this test run")
+		},
+		detectEnd: func(context.Context, string, int) (string, error) {
+			return "", errors.New("detection is not available in this test run")
+		},
+		workflow: func(context.Context, distribution.DriveClient, notification.EmailSender, ProcessInput) error {
+			return errors.New("the workflow is not available in this test run")
+		},
+		now: func() time.Time { return now },
+	}
+	return run.run(ctx)
 }
 
 // productionFileSizer provides file sizes using os.Stat

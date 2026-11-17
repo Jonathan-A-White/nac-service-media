@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"nac-service-media/cmd"
 	domainfs "nac-service-media/domain/filesystem"
@@ -52,6 +53,7 @@ type processContext struct {
 	usedSourcePath string
 	serviceDate    string
 	trimmedFile    string
+	now            time.Time // the scheduled run's clock
 }
 
 // SharedProcessContext is reset before each scenario via Before hook
@@ -421,6 +423,10 @@ func InitializeProcessScenario(ctx *godog.ScenarioContext) {
 
 	// Action steps
 	ctx.Step(`^I run process with flags:$`, iRunProcessWithFlags)
+	ctx.Step(`^the scheduled run starts on "([^"]*)" for recipient "([^"]*)"$`, theScheduledRunStartsOnFor)
+	ctx.Step(`^an email with subject "([^"]*)" should be sent to "([^"]*)"$`, anEmailWithSubjectShouldBeSentTo)
+	ctx.Step(`^the email should say "([^"]*)"$`, theEmailShouldSay)
+	ctx.Step(`^no email should be sent$`, noEmailShouldBeSent)
 
 	// Assertion steps
 	ctx.Step(`^the process should succeed$`, theProcessShouldSucceed)
@@ -995,4 +1001,62 @@ func emailShouldIncludeAudioLinkOnly() error {
 		return nil
 	}
 	return fmt.Errorf("no matching email found")
+}
+
+// theScheduledRunStartsOnFor runs the scheduled task's own command: no
+// --input, so the run looks for the newest recording itself, with its clock set.
+func theScheduledRunStartsOnFor(day, recipient string) error {
+	p := getProcessContext()
+	now, err := time.ParseInLocation("2006-01-02", day, time.Local)
+	if err != nil {
+		return fmt.Errorf("bad day %q: %w", day, err)
+	}
+	p.now = now.Add(12 * time.Hour)
+	p.err = cmd.RunScheduledProcessWithDependencies(
+		context.Background(), p.cfg, p.driveService, p.gmailService, p.fileFinder,
+		[]string{recipient}, p.output, p.now)
+	return nil
+}
+
+func sentEmails(p *processContext) []string {
+	var all []string
+	for _, msg := range p.gmailService.sentMessages {
+		if decoded, err := base64.URLEncoding.DecodeString(msg.Raw); err == nil {
+			all = append(all, string(decoded))
+		}
+	}
+	return all
+}
+
+func anEmailWithSubjectShouldBeSentTo(subject, address string) error {
+	p := getProcessContext()
+	emails := sentEmails(p)
+	if len(emails) != 1 {
+		return fmt.Errorf("expected exactly one email, got %d", len(emails))
+	}
+	if !strings.Contains(emails[0], "Subject: "+subject+"\r\n") {
+		return fmt.Errorf("expected subject %q in:\n%s", subject, emails[0])
+	}
+	if !strings.Contains(emails[0], "To: ") || !strings.Contains(emails[0], address) {
+		return fmt.Errorf("expected the email to go to %q in:\n%s", address, emails[0])
+	}
+	return nil
+}
+
+func theEmailShouldSay(text string) error {
+	p := getProcessContext()
+	for _, email := range sentEmails(p) {
+		if strings.Contains(email, text) {
+			return nil
+		}
+	}
+	return fmt.Errorf("no email says %q", text)
+}
+
+func noEmailShouldBeSent() error {
+	p := getProcessContext()
+	if n := len(p.gmailService.sentMessages); n != 0 {
+		return fmt.Errorf("expected no email, got %d", n)
+	}
+	return nil
 }
