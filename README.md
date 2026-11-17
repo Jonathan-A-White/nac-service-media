@@ -29,7 +29,7 @@ CLI tool to automate the processing and distribution of church service recording
   - [Manual Testing](#manual-testing)
   - [Uninstallation](#uninstallation)
   - [Troubleshooting a Missed Run](#troubleshooting-a-missed-run)
-- [Sunday Watch (Laptop)](#sunday-watch-laptop)
+- [Sunday and Wednesday Watch (Laptop)](#sunday-and-wednesday-watch-laptop)
 - [Development](#development)
   - [Running Tests](#running-tests)
   - [Project Structure](#project-structure)
@@ -486,24 +486,27 @@ also exits 1 and emails. In a scheduled run (nobody at the terminal) a Google
 sign-in that needs the browser gives up after two minutes; fix it with
 `nac-service-media auth status --fix`.
 
-## Sunday Watch (Laptop)
+## Sunday and Wednesday Watch (Laptop)
 
 The church PC's run mails the A/V team "White Plains: Recording of Service on
-MM/DD/YYYY" after a Sunday recording. That mail is forwarded to Postern, which
-keeps one `service-recording` alert for the Sunday (Postern's
+MM/DD/YYYY" after a Sunday (12:30) or Wednesday (21:30) recording. That mail is
+forwarded to Postern, which keeps one `service-recording` alert for the day (Postern's
 `docs/alerts-mail.md`). The watch runs on the **Laptop**, not on the church PC,
 and checks that the alert came.
 
 ```bash
 nac-service-media watch                       # today, America/New_York
 nac-service-media watch --date 2026-11-15     # one Sunday
+nac-service-media watch --date 2026-11-18     # one Wednesday
+nac-service-media watch --sunday              # the latest Sunday (today when it is one)
+nac-service-media watch --wednesday           # the latest Wednesday (today when it is one)
 nac-service-media watch --date 2026-11-15 --dry-run   # print the mail, send and claim nothing
 nac-service-media watch --date 2026-11-15 --skip-postern --dry-run   # look at the PC only
 ```
 
 What it does, in order:
 
-1. Asks Postern for a `service-recording` alert whose date is the Sunday
+1. Asks Postern for a `service-recording` alert whose date is the day
    (settings in `~/.config/nac-service-media/postern.env`, mode 0600, never
    committed: `POSTERN_URL`, and the family's key as `POSTERN_KEY` or
    `POSTERN_KEY_FILE`). Found: it claims the alert, logs one line, exits 0, and
@@ -523,21 +526,30 @@ What it does, in order:
 | `other` | Anything else: a run that never finished, a run that sent its mail while Postern has no alert, a failure with no recording, an unreadable report, Postern itself not answering | mail the Mayor |
 
 Each non-quiet class sends ONE `mw mail send mayor` with the subject `Church
-Sunday watch <date>: <class>` and the evidence in the body (recording paths and
+<Sunday|Wednesday> watch <date>: <class>` and the evidence in the body (recording paths and
 sizes, the run logs and the tail of the newest, ssh's error), so the Mayor
 investigates, fixes, installs, re-runs and tells the Governor. If Postern cannot
 be asked (no `postern.env`, a refusal, no network) the watch still looks at the
 PC and says so in the log or the mail.
 
-The Laptop's timer runs `watch --sunday` (the latest Sunday, so a catch-up run
-on Monday still watches Sunday) at **13:00 America/New_York every Sunday**,
-with `Persistent=true`. `make install` (and `make install-watch`, which builds
-without OpenCV) installs it as a systemd user timer; it skips itself on the
-church PC. Check it with `systemctl --user list-timers nac-service-media-watch.timer`;
-the log is `journalctl --user -u nac-service-media-watch`.
+The Laptop has two timers, both with `Persistent=true`:
+
+- `nac-service-media-watch.timer` runs `watch --sunday` (the latest Sunday, so a
+  catch-up run on Monday still watches Sunday) at **13:00 America/New_York every
+  Sunday**, an hour after the church PC's 12:30 run.
+- `nac-service-media-watch-wednesday.timer` runs `watch --wednesday` (the latest
+  Wednesday, so a catch-up run on Thursday still watches Wednesday) at **22:30
+  America/New_York every Wednesday**, an hour after the church PC's 21:30 run.
+  The time is provisional until the Governor confirms it.
+
+`make install` (and `make install-watch`, which builds without OpenCV) installs
+both as systemd user timers; it skips itself on the church PC. Check them with
+`systemctl --user list-timers 'nac-service-media-watch*.timer'`; the logs are
+`journalctl --user -u nac-service-media-watch` and
+`journalctl --user -u nac-service-media-watch-wednesday`.
 
 The way back: `make uninstall-watch-timer`, or just
-`systemctl --user disable --now nac-service-media-watch.timer`. Nothing else
+`systemctl --user disable --now nac-service-media-watch.timer nac-service-media-watch-wednesday.timer`. Nothing else
 depends on it; the church PC's own run and emails are untouched.
 
 ## Development
@@ -558,7 +570,7 @@ nac-service-media/
 │   ├── distribution/      # Google Drive
 │   ├── notification/      # Email
 │   ├── detection/         # Timestamp detection
-│   └── watch/             # Sunday watch ports (Postern, church PC, Mayor's mail)
+│   └── watch/             # Sunday and Wednesday watch ports (Postern, church PC, Mayor's mail)
 ├── application/           # Application services
 ├── infrastructure/        # External integrations
 │   ├── config/           # YAML config
