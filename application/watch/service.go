@@ -174,6 +174,8 @@ func (s *Service) sort(ctx context.Context, date, postern string) Result {
 		switch {
 		case len(rep.logs) == 0:
 			return finish(NoRecording, "the PC answers, no OBS recording that day, and no run log")
+		case n.notSent != "":
+			return finish(Other, notSentWhy("no OBS recording that day", n.notSent))
 		case n.nothingToDo || (n.noNew && n.exit != nil):
 			return finish(NoRecording, "the PC answers, no OBS recording that day, and the run said nothing to do")
 		}
@@ -182,12 +184,20 @@ func (s *Service) sort(ctx context.Context, date, postern string) Result {
 		return finish(RunFailed, "a recording exists but there is no run log for the day (the task never started, or it failed before logging)")
 	case n.exit == nil:
 		return finish(Other, "a recording exists and the newest run log has no 'Exit code' line: the run did not finish (still running, killed, or the PC went to sleep)")
+	case (*n.exit != 0 || n.failure) && n.notSent != "":
+		return finish(RunFailed, notSentWhy(fmt.Sprintf("a recording exists and the run failed (exit code %d)", *n.exit), n.notSent))
 	case *n.exit != 0 || n.failure:
 		return finish(RunFailed, fmt.Sprintf("a recording exists and the run failed (exit code %d)", *n.exit))
 	case !rep.anySent():
 		return finish(MailNotSent, "a recording exists and the run succeeded, but no log of the day shows a mail sent")
 	}
 	return finish(Other, "a recording exists, the run succeeded and its log shows the mail was sent, yet Postern holds no alert: look at the Gmail forward and the alerts-mail receiver")
+}
+
+// notSentWhy words the class line when the run's own log says its email did
+// not go out: nobody was told but the watch.
+func notSentWhy(what, banner string) string {
+	return fmt.Sprintf("%s, and the run's log says %q: its own email did not go out, so nobody has been told but this watch (see the log lines below)", what, oneLine(banner))
 }
 
 // dayName is the weekday of a YYYY-MM-DD date ("Sunday", "Wednesday"), as the
@@ -203,6 +213,10 @@ func dayName(date string) string {
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // --- the remote script and its pcReport ---
+
+// MarkerPattern is the grep -E pattern for the lines of a run log that say
+// how the run went.
+const MarkerPattern = `Exit code:|SUCCESS:|FAILURE|Sent to:|nothing to do|No new service recording since|EMAIL NOT SENT`
 
 // RemoteScript is the one read-only shell script the watch runs on the PC:
 // it lists the day's recordings and run logs, greps the lines that say how
@@ -240,6 +254,10 @@ type runInfo struct {
 	sent        bool
 	nothingToDo bool
 	noNew       bool
+	// notSent is the banner line of the run's own log that says an email
+	// (the failure email, the no-new-recording email) could not go out: "" when
+	// there is none.
+	notSent string
 }
 
 type pcReport struct {
@@ -289,6 +307,9 @@ func parseReport(out string) (*pcReport, error) {
 				if code, err := strconv.Atoi(m[1]); err == nil {
 					ri.exit = &code
 				}
+			}
+			if strings.Contains(text, "EMAIL NOT SENT") && ri.notSent == "" {
+				ri.notSent = strings.TrimSpace(strings.TrimLeft(text, "! "))
 			}
 			switch {
 			case strings.Contains(text, "FAILURE"):

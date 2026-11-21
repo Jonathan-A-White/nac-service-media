@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -230,4 +232,69 @@ func TestWatchTimersParseInSystemdAnalyze(t *testing.T) {
 	if lookErr != nil {
 		t.Skip("systemd-analyze is not on PATH: the OnCalendar lines were compared, not parsed")
 	}
+}
+
+// pcMarkers is what the watch's remote grep keeps of a run's log: the lines
+// holding any of the patterns in appwatch.MarkerPattern, as <path>:<n>:<text>.
+func pcMarkers(t *testing.T, logPath, log string) string {
+	t.Helper()
+	re := regexp.MustCompile(appwatch.MarkerPattern)
+	var b strings.Builder
+	for i, line := range strings.Split(log, "\n") {
+		if re.MatchString(line) {
+			fmt.Fprintf(&b, "%s:%d:%s\n", logPath, i+1, line)
+		}
+	}
+	return b.String()
+}
+
+// A run whose Gmail token is dead exits non-zero and writes FAILURE EMAIL NOT
+// SENT; the watch, finding that log, names that line in its mail to the Mayor.
+func TestProcess_DeadMailer_WatchNamesFailureEmailNotSent(t *testing.T) {
+	var runOut bytes.Buffer
+	mailer := &fakeMailer{sendErr: errors.New("oauth2: token expired and refresh token is not set")}
+	run := newTestRun(&runOut, mailer)
+	run.detectStart = func(ctx context.Context, videoPath string) (string, error) {
+		return "", errors.New("auto-detection failed: could not detect cross lighting up in search range")
+	}
+	if err := run.run(context.Background()); err == nil {
+		t.Fatal("a run whose mailer is dead must exit non-zero")
+	}
+	if !strings.Contains(runOut.String(), "FAILURE EMAIL NOT SENT") {
+		t.Fatalf("the run's log lacks FAILURE EMAIL NOT SENT:\n%s", runOut.String())
+	}
+
+	// The scheduled wrapper appends the exit code and FAILURE line to the log.
+	const lg = "/r/logs/scheduled-run-2026-11-15_12-30-00.log"
+	log := runOut.String() + "[2026-11-15 12:31:00] Exit code: 1\n[2026-11-15 12:31:00] FAILURE: Processing failed with exit code 1\n"
+	pc := "@@recordings\n1000 /mnt/d/Videos/2026-11-15 10-06-16.mp4\n@@logs\n" + lg + "\n@@markers\n" +
+		pcMarkers(t, lg, log) + "@@tail\n@@end\n"
+
+	var out bytes.Buffer
+	m := &captureMail{}
+	if err := RunWatchWithDependencies(context.Background(), WatchOptions{Date: "2026-11-15"}, noAlerts{}, fixedPC{pc}, m, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.bodies) != 1 {
+		t.Fatalf("want one mail to the Mayor, got %d", len(m.bodies))
+	}
+	var class string
+	for _, l := range strings.Split(m.bodies[0], "\n") {
+		if strings.HasPrefix(l, "Class: ") {
+			class = l
+		}
+	}
+	if !strings.Contains(class, "FAILURE EMAIL NOT SENT") {
+		t.Errorf("the Class line must name FAILURE EMAIL NOT SENT, got %q\n%s", class, m.bodies[0])
+	}
+	if !strings.Contains(m.bodies[0], "!!! FAILURE EMAIL NOT SENT: ") {
+		t.Errorf("the mail must carry the log's own FAILURE EMAIL NOT SENT line:\n%s", m.bodies[0])
+	}
+}
+
+type captureMail struct{ bodies []string }
+
+func (c *captureMail) SendMayor(_ context.Context, _, body string) error {
+	c.bodies = append(c.bodies, body)
+	return nil
 }
